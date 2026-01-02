@@ -9,6 +9,7 @@ require (
 	github.com/go-playground/validator/v10 v10.30.1
 	github.com/gofiber/fiber/v3 v3.0.0-rc.3
 	github.com/google/uuid v1.6.0
+	github.com/oklog/ulid/v2 v2.1.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.17.2
 	github.com/spf13/viper v1.21.0
