@@ -15,7 +15,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
-	"ais.local/ais-go-pkg/logger"
+	"github.com/aisgo/ais-go-pkg/logger"
 
 	"go.uber.org/fx"
 	"go.uber.org/zap"

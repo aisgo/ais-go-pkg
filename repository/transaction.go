@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 
-	"ais.local/ais-go-pkg/errors"
+	"github.com/aisgo/ais-go-pkg/errors"
 
 	"gorm.io/gorm"
 )

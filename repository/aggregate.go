@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"ais.local/ais-go-pkg/errors"
+	"github.com/aisgo/ais-go-pkg/errors"
 )
 
 /* ========================================================================

@@ -3,7 +3,7 @@ package repository
 import (
 	"time"
 
-	"ais.local/ais-go-pkg/utils/id-generator/snowflake"
+	"github.com/aisgo/ais-go-pkg/utils/id-generator/snowflake"
 
 	"gorm.io/gorm"
 	"gorm.io/plugin/soft_delete"

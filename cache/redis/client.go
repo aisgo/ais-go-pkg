@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"ais.local/ais-go-pkg/logger"
+	"github.com/aisgo/ais-go-pkg/logger"
 
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/fx"

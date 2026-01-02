@@ -1,4 +1,4 @@
-module ais.local/ais-go-pkg
+module github.com/aisgo/ais-go-pkg
 
 go 1.25.5
 

@@ -4,7 +4,7 @@ import (
 	"crypto/subtle"
 	"strings"
 
-	"ais.local/ais-go-pkg/logger"
+	"github.com/aisgo/ais-go-pkg/logger"
 
 	"github.com/gofiber/fiber/v3"
 	"go.uber.org/zap"

@@ -11,7 +11,7 @@ import (
 	"github.com/apache/rocketmq-client-go/v2/producer"
 	"go.uber.org/zap"
 
-	"ais.local/ais-go-pkg/mq"
+	"github.com/aisgo/ais-go-pkg/mq"
 )
 
 /* ========================================================================

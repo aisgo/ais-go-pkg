@@ -45,9 +45,9 @@
 
 ```bash
 # 在你的项目 go.mod 中添加
-replace ais.local/ais-go-pkg => ../ais-go-pkg
+replace github.com/aisgo/ais-go-pkg => ../ais-go-pkg
 
-require ais.local/ais-go-pkg v0.0.0
+require github.com/aisgo/ais-go-pkg v0.0.0
 ```
 
 #### 方式二：Git 依赖（正式发布后）
@@ -62,9 +62,9 @@ go get github.com/your-org/ais-go-pkg@v1.0.0
 package main
 
 import (
-    "ais.local/ais-go-pkg/logger"
-    "ais.local/ais-go-pkg/database/postgres"
-    "ais.local/ais-go-pkg/cache/redis"
+    "github.com/aisgo/ais-go-pkg/logger"
+    "github.com/aisgo/ais-go-pkg/database/postgres"
+    "github.com/aisgo/ais-go-pkg/cache/redis"
     "go.uber.org/zap"
 )
 
@@ -113,7 +113,7 @@ func main() {
 基于 Zap 的高性能日志组件，支持 JSON 和 Console 格式。
 
 ```go
-import "ais.local/ais-go-pkg/logger"
+import "github.com/aisgo/ais-go-pkg/logger"
 
 log := logger.NewLogger(logger.Config{
     Level:      "info",        // debug, info, warn, error
@@ -132,7 +132,7 @@ log.Info("user login",
 预配置连接池和日志适配器。
 
 ```go
-import "ais.local/ais-go-pkg/database/postgres"
+import "github.com/aisgo/ais-go-pkg/database/postgres"
 
 db, err := postgres.NewDB(postgres.Config{
     Host:            "localhost",
@@ -158,7 +158,7 @@ db.AutoMigrate(&User{})
 封装 go-redis/v9，提供分布式锁实现。
 
 ```go
-import "ais.local/ais-go-pkg/cache/redis"
+import "github.com/aisgo/ais-go-pkg/cache/redis"
 
 client := redis.NewClient(redis.ClientParams{
     Addr:         "localhost:6379",
@@ -186,9 +186,9 @@ if lock.Acquire(ctx) {
 
 ```go
 import (
-    "ais.local/ais-go-pkg/mq"
-    _ "ais.local/ais-go-pkg/mq/kafka"     // 注册 Kafka 实现
-    _ "ais.local/ais-go-pkg/mq/rocketmq"  // 注册 RocketMQ 实现
+    "github.com/aisgo/ais-go-pkg/mq"
+    _ "github.com/aisgo/ais-go-pkg/mq/kafka"     // 注册 Kafka 实现
+    _ "github.com/aisgo/ais-go-pkg/mq/rocketmq"  // 注册 RocketMQ 实现
 )
 
 // ================================================================
@@ -227,7 +227,7 @@ consumer.Subscribe(ctx, []string{"order-events"}, func(msg *mq.Message) error {
 #### HTTP Server (Fiber v3)
 
 ```go
-import "ais.local/ais-go-pkg/transport/http"
+import "github.com/aisgo/ais-go-pkg/transport/http"
 
 server := http.NewHTTPServer(http.ServerParams{
     Port:   8080,
@@ -245,7 +245,7 @@ server.Start()
 #### gRPC Server
 
 ```go
-import "ais.local/ais-go-pkg/transport/grpc"
+import "github.com/aisgo/ais-go-pkg/transport/grpc"
 
 server := grpc.NewServer(grpc.ServerParams{
     Port:   50051,
@@ -261,7 +261,7 @@ server.Start()
 ### 📊 Metrics - Prometheus 监控
 
 ```go
-import "ais.local/ais-go-pkg/metrics"
+import "github.com/aisgo/ais-go-pkg/metrics"
 
 // 注册指标
 requestCounter := metrics.NewCounter("http_requests_total", "Total HTTP requests")
@@ -277,7 +277,7 @@ requestDuration.Observe(0.05)
 提供通用 CRUD、分页、聚合等数据访问模式。
 
 ```go
-import "ais.local/ais-go-pkg/repository"
+import "github.com/aisgo/ais-go-pkg/repository"
 
 type UserRepository struct {
     repository.BaseRepository[User]
@@ -303,7 +303,7 @@ page := repo.Paginate(ctx, repository.PageRequest{
 基于 validator/v10 的验证器封装。
 
 ```go
-import "ais.local/ais-go-pkg/validator"
+import "github.com/aisgo/ais-go-pkg/validator"
 
 type CreateUserRequest struct {
     Email    string `validate:"required,email"`
@@ -324,7 +324,7 @@ if err := v.Validate(req); err != nil {
 分优先级管理资源清理顺序。
 
 ```go
-import "ais.local/ais-go-pkg/shutdown"
+import "github.com/aisgo/ais-go-pkg/shutdown"
 
 manager := shutdown.NewManager(log)
 

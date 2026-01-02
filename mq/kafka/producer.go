@@ -12,7 +12,7 @@ import (
 	"github.com/IBM/sarama"
 	"go.uber.org/zap"
 
-	"ais.local/ais-go-pkg/mq"
+	"github.com/aisgo/ais-go-pkg/mq"
 )
 
 /* ========================================================================

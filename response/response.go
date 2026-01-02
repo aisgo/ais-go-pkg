@@ -3,7 +3,7 @@ package response
 import (
 	"net/http"
 
-	"ais.local/ais-go-pkg/errors"
+	"github.com/aisgo/ais-go-pkg/errors"
 
 	"github.com/gofiber/fiber/v3"
 )

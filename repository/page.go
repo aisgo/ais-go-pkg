@@ -4,7 +4,7 @@ import (
 	"context"
 	"math"
 
-	"ais.local/ais-go-pkg/errors"
+	"github.com/aisgo/ais-go-pkg/errors"
 )
 
 /* ========================================================================

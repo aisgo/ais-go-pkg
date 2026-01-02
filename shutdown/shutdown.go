@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"ais.local/ais-go-pkg/logger"
+	"github.com/aisgo/ais-go-pkg/logger"
 
 	"go.uber.org/fx"
 	"go.uber.org/zap"

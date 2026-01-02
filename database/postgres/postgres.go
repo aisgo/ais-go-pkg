@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"ais.local/ais-go-pkg/database"
-	"ais.local/ais-go-pkg/logger"
+	"github.com/aisgo/ais-go-pkg/database"
+	"github.com/aisgo/ais-go-pkg/logger"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"

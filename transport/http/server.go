@@ -6,8 +6,8 @@ import (
 	"runtime"
 	"time"
 
-	"ais.local/ais-go-pkg/logger"
-	"ais.local/ais-go-pkg/metrics"
+	"github.com/aisgo/ais-go-pkg/logger"
+	"github.com/aisgo/ais-go-pkg/metrics"
 
 	"github.com/gofiber/fiber/v3"
 	"go.uber.org/fx"

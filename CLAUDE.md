@@ -67,9 +67,9 @@ ais-go-pkg/
 
 ```go
 // go.mod
-replace ais.local/ais-go-pkg => ../ais-go-pkg
+replace github.com/aisgo/ais-go-pkg => ../ais-go-pkg
 
-require ais.local/ais-go-pkg v0.0.0
+require github.com/aisgo/ais-go-pkg v0.0.0
 ```
 
 ### 方式二：Git Tag（正式发布后）
@@ -83,7 +83,7 @@ require github.com/wangxiaomei/ais-go-pkg v1.0.0
 
 ### Logger - 结构化日志
 ```go
-import "ais.local/ais-go-pkg/logger"
+import "github.com/aisgo/ais-go-pkg/logger"
 
 log := logger.NewLogger(logger.Config{
     Level:  "info",
@@ -94,7 +94,7 @@ log.Info("hello", zap.String("key", "value"))
 
 ### Database - PostgreSQL + GORM
 ```go
-import "ais.local/ais-go-pkg/database/postgres"
+import "github.com/aisgo/ais-go-pkg/database/postgres"
 
 db, err := postgres.NewDB(postgres.Config{
     Host: "localhost", Port: 5432,
@@ -104,7 +104,7 @@ db, err := postgres.NewDB(postgres.Config{
 
 ### Cache - Redis
 ```go
-import "ais.local/ais-go-pkg/cache/redis"
+import "github.com/aisgo/ais-go-pkg/cache/redis"
 
 client := redis.NewClient(redis.ClientParams{...})
 client.Set(ctx, "key", "value", 1*time.Hour)
@@ -117,9 +117,9 @@ defer lock.Release(ctx)
 
 ### MQ - 消息队列抽象
 ```go
-import "ais.local/ais-go-pkg/mq"
-import _ "ais.local/ais-go-pkg/mq/kafka"     // 注册 Kafka
-import _ "ais.local/ais-go-pkg/mq/rocketmq" // 注册 RocketMQ
+import "github.com/aisgo/ais-go-pkg/mq"
+import _ "github.com/aisgo/ais-go-pkg/mq/kafka"     // 注册 Kafka
+import _ "github.com/aisgo/ais-go-pkg/mq/rocketmq" // 注册 RocketMQ
 
 // 根据配置自动选择实现
 cfg := &mq.Config{Type: mq.TypeKafka, Kafka: ...}
@@ -131,8 +131,8 @@ producer.SendSync(ctx, msg)
 
 ### Transport - HTTP/gRPC
 ```go
-import "ais.local/ais-go-pkg/transport/http"
-import "ais.local/ais-go-pkg/transport/grpc"
+import "github.com/aisgo/ais-go-pkg/transport/http"
+import "github.com/aisgo/ais-go-pkg/transport/grpc"
 
 // HTTP (Fiber)
 app := http.NewHTTPServer(http.ServerParams{...})
