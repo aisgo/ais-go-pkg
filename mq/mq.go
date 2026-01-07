@@ -157,9 +157,9 @@ type SendCallback func(result *SendResult, err error)
 type ConsumeResult int
 
 const (
-	ConsumeSuccess   ConsumeResult = iota // 消费成功
-	ConsumeRetryLater                     // 稍后重试
-	ConsumeCommit                         // 提交（Kafka）
+	ConsumeSuccess    ConsumeResult = iota // 消费成功
+	ConsumeRetryLater                      // 稍后重试
+	ConsumeCommit                          // 提交（Kafka）
 )
 
 // MessageHandler 消息处理函数

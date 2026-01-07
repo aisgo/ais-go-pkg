@@ -53,7 +53,8 @@ func (v *Validator) Validate(s interface{}) error {
 	}
 
 	validationErrors := &ValidationError{Errors: make(map[string][]string)}
-	v.validateRecursive(s, "", validationErrors)
+	visited := make(map[uintptr]bool)
+	v.validateRecursive(s, "", validationErrors, visited)
 
 	if validationErrors.HasErrors() {
 		return validationErrors
@@ -62,9 +63,19 @@ func (v *Validator) Validate(s interface{}) error {
 }
 
 // validateRecursive 递归验证结构体
-func (v *Validator) validateRecursive(s interface{}, prefix string, validationErrors *ValidationError) {
+func (v *Validator) validateRecursive(s interface{}, prefix string, validationErrors *ValidationError, visited map[uintptr]bool) {
 	value := reflect.ValueOf(s)
+
+	// 如果是指针，记录并检查是否已访问
 	if value.Kind() == reflect.Ptr {
+		if value.IsNil() {
+			return
+		}
+		ptr := value.Pointer()
+		if visited[ptr] {
+			return // 防止循环引用
+		}
+		visited[ptr] = true
 		value = value.Elem()
 	}
 
@@ -90,9 +101,12 @@ func (v *Validator) validateRecursive(s interface{}, prefix string, validationEr
 				if fieldValue.IsNil() {
 					continue // 跳过 nil 指针
 				}
-				fieldValue = fieldValue.Elem()
+				// 注意：这里不需要手动 Elem()，因为下一层 validateRecursive 会处理指针
+				v.validateRecursive(fieldValue.Interface(), fullFieldName, validationErrors, visited)
+			} else {
+				// 非指针结构体，直接递归
+				v.validateRecursive(fieldValue.Addr().Interface(), fullFieldName, validationErrors, visited)
 			}
-			v.validateRecursive(fieldValue.Interface(), fullFieldName, validationErrors)
 			continue
 		}
 

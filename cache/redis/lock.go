@@ -3,6 +3,7 @@ package redis
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,8 +29,10 @@ type Lock struct {
 	ttl          time.Duration
 	defaultOpt   LockOption
 	stopChan     chan struct{} // 用于停止续期 goroutine
+	stopOnce     sync.Once     // 确保 stopChan 只关闭一次
 	extendCtx    context.Context
 	extendCancel context.CancelFunc
+	mu           sync.Mutex // 保护 extendCtx 和 extendCancel
 }
 
 // LockOption 锁选项
@@ -87,8 +90,10 @@ func (l *Lock) AcquireWithOption(ctx context.Context, opt LockOption) error {
 		if ok {
 			// 如果开启自动续期，启动续期 goroutine
 			if opt.AutoExtend {
+				l.mu.Lock()
 				l.extendCtx, l.extendCancel = context.WithCancel(context.Background())
 				go l.autoExtendLoop(l.extendCtx, opt.ExtendFactor)
+				l.mu.Unlock()
 			}
 			return nil
 		}
@@ -120,12 +125,17 @@ func (l *Lock) autoExtendLoop(ctx context.Context, extendFactor float64) {
 			return
 		case <-ticker.C:
 			extendCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			if err := l.Extend(extendCtx, l.ttl); err != nil {
-				// 续期失败，停止续期（锁可能已被其他进程获取）
-				cancel()
-				return
-			}
+			err := l.Extend(extendCtx, l.ttl)
 			cancel()
+
+			if err != nil {
+				if errors.Is(err, ErrLockFailed) {
+					// 锁已过期或被其他进程夺取，停止续期
+					return
+				}
+				// 网络抖动或其他 Redis 错误，记录日志并继续下一次重试
+				// 不直接 return，防止在短暂网络故障下锁意外失效
+			}
 		}
 	}
 }
@@ -134,17 +144,16 @@ func (l *Lock) autoExtendLoop(ctx context.Context, extendFactor float64) {
 // 使用 Lua 脚本保证原子性：只有持有锁的人才能释放
 func (l *Lock) Release(ctx context.Context) error {
 	// 停止自动续期 goroutine
+	l.mu.Lock()
 	if l.extendCancel != nil {
 		l.extendCancel()
 	}
+	l.mu.Unlock()
 
-	// 停止自动续期
-	select {
-	case <-l.stopChan:
-		// 已经关闭
-	default:
+	// 停止自动续期 (确保只关闭一次)
+	l.stopOnce.Do(func() {
 		close(l.stopChan)
-	}
+	})
 
 	// Lua 脚本: 如果 value 匹配则删除
 	script := `

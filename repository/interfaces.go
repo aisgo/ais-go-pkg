@@ -95,28 +95,28 @@ type CRUDRepository[T any] interface {
 	Update(ctx context.Context, model *T) error
 
 	// UpdateByID 根据 ID 更新指定字段
-	UpdateByID(ctx context.Context, id int64, updates map[string]any) error
+	UpdateByID(ctx context.Context, id string, updates map[string]any) error
 
 	// UpdateBatch 批量更新记录
 	UpdateBatch(ctx context.Context, models []*T) error
 
 	// Delete 软删除记录（设置 deleted_at）
-	Delete(ctx context.Context, id int64) error
+	Delete(ctx context.Context, id string) error
 
 	// DeleteBatch 批量软删除记录
-	DeleteBatch(ctx context.Context, ids []int64) error
+	DeleteBatch(ctx context.Context, ids []string) error
 
 	// HardDelete 硬删除记录（从数据库移除）
-	HardDelete(ctx context.Context, id int64) error
+	HardDelete(ctx context.Context, id string) error
 }
 
 // QueryRepository 查询操作接口
 type QueryRepository[T any] interface {
 	// FindByID 根据 ID 查找记录
-	FindByID(ctx context.Context, id int64, opts ...Option) (*T, error)
+	FindByID(ctx context.Context, id string, opts ...Option) (*T, error)
 
 	// FindByIDs 根据 ID 列表查找多条记录
-	FindByIDs(ctx context.Context, ids []int64, opts ...Option) ([]*T, error)
+	FindByIDs(ctx context.Context, ids []string, opts ...Option) ([]*T, error)
 
 	// FindOne 查找单条记录（使用自定义条件）
 	FindOne(ctx context.Context, query string, args ...any) (*T, error)

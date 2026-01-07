@@ -26,10 +26,10 @@ type Config struct {
 	Password        string        `yaml:"password"`
 	DBName          string        `yaml:"dbname"`
 	SSLMode         string        `yaml:"sslmode"`
-	Schema          string        `yaml:"schema"`            // 数据库 schema，默认 public
-	MaxIdleConns    int           `yaml:"max_idle_conns"`    // 最大空闲连接数
-	MaxOpenConns    int           `yaml:"max_open_conns"`    // 最大打开连接数
-	ConnMaxLifetime time.Duration `yaml:"conn_max_lifetime"` // 连接最大生命周期
+	Schema          string        `yaml:"schema"`             // 数据库 schema，默认 public
+	MaxIdleConns    int           `yaml:"max_idle_conns"`     // 最大空闲连接数
+	MaxOpenConns    int           `yaml:"max_open_conns"`     // 最大打开连接数
+	ConnMaxLifetime time.Duration `yaml:"conn_max_lifetime"`  // 连接最大生命周期
 	ConnMaxIdleTime time.Duration `yaml:"conn_max_idle_time"` // 空闲连接最大时间
 }
 
@@ -38,10 +38,17 @@ func NewDB(cfg Config, log *logger.Logger) (*gorm.DB, error) {
 	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
 		cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.DBName, cfg.SSLMode)
 
+	// 如果配置了 schema，添加到 DSN
+	if cfg.Schema != "" {
+		dsn = fmt.Sprintf("%s search_path=%s", dsn, cfg.Schema)
+	}
+
 	// 使用自定义的 ZapGormLogger
 	gormLog := database.NewZapGormLogger(log.Logger)
 
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+	db, err := gorm.Open(postgres.New(postgres.Config{
+		DSN: dsn,
+	}), &gorm.Config{
 		Logger: gormLog,
 		NowFunc: func() time.Time {
 			return time.Now().Local()
@@ -81,13 +88,6 @@ func NewDB(cfg Config, log *logger.Logger) (*gorm.DB, error) {
 	sqlDB.SetMaxOpenConns(maxOpenConns)
 	sqlDB.SetConnMaxLifetime(connMaxLifetime)
 	sqlDB.SetConnMaxIdleTime(connMaxIdleTime)
-
-	// 设置默认 schema（如果配置了）
-	if cfg.Schema != "" {
-		if err := db.Exec(fmt.Sprintf("SET search_path TO %s", cfg.Schema)).Error; err != nil {
-			return nil, fmt.Errorf("failed to set search_path: %w", err)
-		}
-	}
 
 	return db, nil
 }

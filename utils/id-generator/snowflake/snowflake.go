@@ -44,7 +44,6 @@ var (
 // Generator ID 生成器
 type Generator struct {
 	node *snowflake.Node
-	mu   sync.Mutex
 }
 
 // NewGenerator 创建新的 ID 生成器
@@ -80,8 +79,6 @@ func MustNewGenerator(nodeID int64) *Generator {
 
 // Generate 生成雪花 ID
 func (g *Generator) Generate() int64 {
-	g.mu.Lock()
-	defer g.mu.Unlock()
 	return g.node.Generate().Int64()
 }
 
@@ -123,8 +120,6 @@ func Generate() int64 {
 		}
 	})
 
-	mu.Lock()
-	defer mu.Unlock()
 	return globalNode.Generate().Int64()
 }
 

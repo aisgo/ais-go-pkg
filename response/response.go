@@ -44,13 +44,16 @@ func respJSONWithStatusCode(c fiber.Ctx, code int, msg string, data ...interface
 		firstData = data[0]
 	}
 
-	// 确保 HTTP 状态码在有效范围内
-	if code > http.StatusNetworkAuthenticationRequired || code < http.StatusContinue {
-		code = http.StatusInternalServerError
+	// 业务响应码保持原样
+	resp := newResp(code, msg, firstData)
+
+	// 确保 HTTP 协议层的状态码在有效范围内 (100-599)
+	httpStatusCode := code
+	if httpStatusCode > 599 || httpStatusCode < 100 {
+		httpStatusCode = http.StatusInternalServerError
 	}
 
-	resp := newResp(code, msg, firstData)
-	return c.Status(code).JSON(resp)
+	return c.Status(httpStatusCode).JSON(resp)
 }
 
 /* ========================================================================

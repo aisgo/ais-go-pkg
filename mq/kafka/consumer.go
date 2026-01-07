@@ -235,16 +235,15 @@ func (h *consumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession,
 			}
 
 			if lastErr != nil {
-				h.adapter.logger.Error("message handling failed after all retries",
+				h.adapter.logger.Error("message handling failed after all retries, stopping consumer to prevent data loss",
 					zap.String("topic", topic),
 					zap.Int32("partition", msg.Partition),
 					zap.Int64("offset", msg.Offset),
 					zap.Error(lastErr),
 				)
-				// 不标记消息已消费，让 Kafka 根据配置重新投递
-				// 这确保消息不会丢失，但可能导致重复处理
-				// 调用方需要实现幂等性
-				continue
+				// 返回错误给 Sarama，这将停止当前分区的消费并触发重平衡
+				// 确保 offset 不会被错误地提交
+				return lastErr
 			}
 
 			// 只有成功处理才标记消息已消费

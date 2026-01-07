@@ -93,6 +93,13 @@ func NewProducerAdapter(cfg *mq.Config, logger *zap.Logger) (mq.Producer, error)
 
 // SendSync 同步发送消息
 func (p *ProducerAdapter) SendSync(ctx context.Context, msg *mq.Message) (*mq.SendResult, error) {
+	if msg.DelayTime > 0 && msg.DelayLevel == 0 {
+		p.logger.Warn("RocketMQ adapter does not support arbitrary DelayTime, please use DelayLevel instead",
+			zap.String("topic", msg.Topic),
+			zap.Duration("delay_time", msg.DelayTime),
+		)
+	}
+
 	rmqMsg := convertToRocketMQMessage(msg)
 
 	result, err := p.producer.SendSync(ctx, rmqMsg)
@@ -114,6 +121,13 @@ func (p *ProducerAdapter) SendSync(ctx context.Context, msg *mq.Message) (*mq.Se
 
 // SendAsync 异步发送消息
 func (p *ProducerAdapter) SendAsync(ctx context.Context, msg *mq.Message, callback mq.SendCallback) error {
+	if msg.DelayTime > 0 && msg.DelayLevel == 0 {
+		p.logger.Warn("RocketMQ adapter does not support arbitrary DelayTime, please use DelayLevel instead",
+			zap.String("topic", msg.Topic),
+			zap.Duration("delay_time", msg.DelayTime),
+		)
+	}
+
 	rmqMsg := convertToRocketMQMessage(msg)
 
 	err := p.producer.SendAsync(ctx, func(ctx context.Context, result *primitive.SendResult, err error) {

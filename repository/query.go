@@ -55,12 +55,12 @@ func (r *RepositoryImpl[T]) buildQuery(ctx context.Context, opts *QueryOption) *
  * ======================================================================== */
 
 // FindByID 根据 ID 查找记录
-func (r *RepositoryImpl[T]) FindByID(ctx context.Context, id int64, opts ...Option) (*T, error) {
+func (r *RepositoryImpl[T]) FindByID(ctx context.Context, id string, opts ...Option) (*T, error) {
 	opt := ApplyOptions(opts)
 	model := r.newModelPtr()
 
 	query := r.buildQuery(ctx, opt)
-	if err := query.First(model, id).Error; err != nil {
+	if err := query.Where("id = ?", id).First(model).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, errors.New(errors.ErrCodeNotFound, "record not found")
 		}
@@ -71,7 +71,7 @@ func (r *RepositoryImpl[T]) FindByID(ctx context.Context, id int64, opts ...Opti
 }
 
 // FindByIDs 根据 ID 列表查找多条记录
-func (r *RepositoryImpl[T]) FindByIDs(ctx context.Context, ids []int64, opts ...Option) ([]*T, error) {
+func (r *RepositoryImpl[T]) FindByIDs(ctx context.Context, ids []string, opts ...Option) ([]*T, error) {
 	if len(ids) == 0 {
 		return []*T{}, nil
 	}
@@ -80,7 +80,7 @@ func (r *RepositoryImpl[T]) FindByIDs(ctx context.Context, ids []int64, opts ...
 	var models []*T
 
 	query := r.buildQuery(ctx, opt)
-	if err := query.Find(&models, ids).Error; err != nil {
+	if err := query.Where("id IN ?", ids).Find(&models).Error; err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to find records", err)
 	}
 

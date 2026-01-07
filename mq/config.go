@@ -35,11 +35,11 @@ func DefaultConfig() *Config {
 
 // RocketMQConfig RocketMQ 配置
 type RocketMQConfig struct {
-	NameServers  []string      `yaml:"name_servers" mapstructure:"name_servers"`
-	Namespace    string        `yaml:"namespace" mapstructure:"namespace"`
-	InstanceName string        `yaml:"instance_name" mapstructure:"instance_name"`
-	AccessKey    string        `yaml:"access_key" mapstructure:"access_key"`
-	SecretKey    string        `yaml:"secret_key" mapstructure:"secret_key"`
+	NameServers  []string `yaml:"name_servers" mapstructure:"name_servers"`
+	Namespace    string   `yaml:"namespace" mapstructure:"namespace"`
+	InstanceName string   `yaml:"instance_name" mapstructure:"instance_name"`
+	AccessKey    string   `yaml:"access_key" mapstructure:"access_key"`
+	SecretKey    string   `yaml:"secret_key" mapstructure:"secret_key"`
 
 	Producer RocketMQProducerConfig `yaml:"producer" mapstructure:"producer"`
 	Consumer RocketMQConsumerConfig `yaml:"consumer" mapstructure:"consumer"`
@@ -57,8 +57,8 @@ type RocketMQProducerConfig struct {
 // RocketMQConsumerConfig RocketMQ 消费者配置
 type RocketMQConsumerConfig struct {
 	GroupName              string        `yaml:"group_name" mapstructure:"group_name"`
-	Model                  string        `yaml:"model" mapstructure:"model"`                                           // Clustering / Broadcasting
-	ConsumeFromWhere       string        `yaml:"consume_from_where" mapstructure:"consume_from_where"`                 // FirstOffset / LastOffset / Timestamp
+	Model                  string        `yaml:"model" mapstructure:"model"`                           // Clustering / Broadcasting
+	ConsumeFromWhere       string        `yaml:"consume_from_where" mapstructure:"consume_from_where"` // FirstOffset / LastOffset / Timestamp
 	ConsumeMessageBatchMax int           `yaml:"consume_message_batch_max" mapstructure:"consume_message_batch_max"`
 	PullBatchSize          int32         `yaml:"pull_batch_size" mapstructure:"pull_batch_size"`
 	PullInterval           time.Duration `yaml:"pull_interval" mapstructure:"pull_interval"`

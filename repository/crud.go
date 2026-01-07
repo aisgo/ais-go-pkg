@@ -2,11 +2,11 @@ package repository
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/aisgo/ais-go-pkg/errors"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 /* ========================================================================
@@ -95,12 +95,13 @@ func (r *RepositoryImpl[T]) CreateBatch(ctx context.Context, models []*T, batchS
  * ======================================================================== */
 
 // Update 更新记录（根据主键）
+// 注意：使用 Save 会更新所有字段，包括零值字段。
 func (r *RepositoryImpl[T]) Update(ctx context.Context, model *T) error {
 	if model == nil {
 		return errors.New(errors.ErrCodeInvalidArgument, "model cannot be nil")
 	}
 
-	result := r.withContext(ctx).Model(model).Updates(model)
+	result := r.withContext(ctx).Save(model)
 	if result.Error != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to update record", result.Error)
 	}
@@ -113,13 +114,23 @@ func (r *RepositoryImpl[T]) Update(ctx context.Context, model *T) error {
 }
 
 // UpdateByID 根据 ID 更新指定字段
-func (r *RepositoryImpl[T]) UpdateByID(ctx context.Context, id int64, updates map[string]any) error {
+func (r *RepositoryImpl[T]) UpdateByID(ctx context.Context, id string, updates map[string]any) error {
 	if len(updates) == 0 {
 		return errors.New(errors.ErrCodeInvalidArgument, "updates cannot be empty")
 	}
 
+	// 过滤非法字段，防止注入/批量赋值漏洞
+	filteredUpdates, err := r.filterUpdates(updates)
+	if err != nil {
+		return err
+	}
+
+	if len(filteredUpdates) == 0 {
+		return errors.New(errors.ErrCodeInvalidArgument, "no valid fields to update")
+	}
+
 	model := r.newModelPtr()
-	result := r.withContext(ctx).Model(model).Where("id = ?", id).Updates(updates)
+	result := r.withContext(ctx).Model(model).Where("id = ?", id).Updates(filteredUpdates)
 	if result.Error != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to update record", result.Error)
 	}
@@ -131,32 +142,64 @@ func (r *RepositoryImpl[T]) UpdateByID(ctx context.Context, id int64, updates ma
 	return nil
 }
 
+// filterUpdates 过滤掉 map 中非法的数据库列名，防止字段注入/批量赋值漏洞
+func (r *RepositoryImpl[T]) filterUpdates(updates map[string]any) (map[string]any, error) {
+	// 解析模型 Schema 以获取合法字段
+	stmt := &gorm.Statement{DB: r.db}
+	if err := stmt.Parse(r.newModelPtr()); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to parse model schema", err)
+	}
+
+	filtered := make(map[string]any)
+	for k, v := range updates {
+		// 优先匹配数据库列名 (DB Name)
+		if field, ok := stmt.Schema.FieldsByDBName[k]; ok {
+			if !field.PrimaryKey && field.Updatable {
+				filtered[k] = v
+			}
+			continue
+		}
+		// 尝试匹配结构体字段名 (Struct Field Name)
+		if field, ok := stmt.Schema.FieldsByName[k]; ok {
+			if !field.PrimaryKey && field.Updatable {
+				filtered[field.DBName] = v
+			}
+			continue
+		}
+	}
+
+	return filtered, nil
+}
+
 // UpdateBatch 批量更新记录
+// 注意：此方法使用 Upsert 语义（如果记录不存在则插入，存在则更新所有字段）。
 func (r *RepositoryImpl[T]) UpdateBatch(ctx context.Context, models []*T) error {
 	if len(models) == 0 {
 		return errors.New(errors.ErrCodeInvalidArgument, "models cannot be empty")
 	}
 
-	// 使用事务执行批量更新
-	return r.withContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for i, model := range models {
-			// 每处理一定数量后检查 context
-			if i > 0 && i%100 == 0 {
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-			}
-
-			if model == nil {
-				continue
-			}
-
-			if err := tx.Model(model).Updates(model).Error; err != nil {
-				return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to update model at index %d", i), err)
-			}
+	// 过滤 nil 模型
+	var validModels []*T
+	for _, m := range models {
+		if m != nil {
+			validModels = append(validModels, m)
 		}
+	}
+
+	if len(validModels) == 0 {
 		return nil
-	})
+	}
+
+	// 使用 Upsert 实现高效批量更新
+	// MySQL: INSERT ... ON DUPLICATE KEY UPDATE
+	// Postgres: INSERT ... ON CONFLICT DO UPDATE
+	if err := r.withContext(ctx).Clauses(clause.OnConflict{
+		UpdateAll: true,
+	}).Save(validModels).Error; err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to batch update records", err)
+	}
+
+	return nil
 }
 
 /* ========================================================================
@@ -164,9 +207,9 @@ func (r *RepositoryImpl[T]) UpdateBatch(ctx context.Context, models []*T) error 
  * ======================================================================== */
 
 // Delete 软删除记录（设置 deleted_at）
-func (r *RepositoryImpl[T]) Delete(ctx context.Context, id int64) error {
+func (r *RepositoryImpl[T]) Delete(ctx context.Context, id string) error {
 	model := r.newModelPtr()
-	result := r.withContext(ctx).Delete(model, id)
+	result := r.withContext(ctx).Delete(model, "id = ?", id)
 	if result.Error != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to delete record", result.Error)
 	}
@@ -179,13 +222,13 @@ func (r *RepositoryImpl[T]) Delete(ctx context.Context, id int64) error {
 }
 
 // DeleteBatch 批量软删除记录
-func (r *RepositoryImpl[T]) DeleteBatch(ctx context.Context, ids []int64) error {
+func (r *RepositoryImpl[T]) DeleteBatch(ctx context.Context, ids []string) error {
 	if len(ids) == 0 {
 		return errors.New(errors.ErrCodeInvalidArgument, "ids cannot be empty")
 	}
 
 	model := r.newModelPtr()
-	if err := r.withContext(ctx).Delete(model, ids).Error; err != nil {
+	if err := r.withContext(ctx).Delete(model, "id IN ?", ids).Error; err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to delete records", err)
 	}
 
@@ -193,9 +236,9 @@ func (r *RepositoryImpl[T]) DeleteBatch(ctx context.Context, ids []int64) error 
 }
 
 // HardDelete 硬删除记录（从数据库移除）
-func (r *RepositoryImpl[T]) HardDelete(ctx context.Context, id int64) error {
+func (r *RepositoryImpl[T]) HardDelete(ctx context.Context, id string) error {
 	model := r.newModelPtr()
-	result := r.withContext(ctx).Unscoped().Delete(model, id)
+	result := r.withContext(ctx).Unscoped().Delete(model, "id = ?", id)
 	if result.Error != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to hard delete record", result.Error)
 	}

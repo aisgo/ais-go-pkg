@@ -232,15 +232,26 @@ func (m *Manager) executeHookGroup(ctx context.Context, hooks []hookEntry) []hoo
 		}(h)
 	}
 
-	// 等待所有钩子完成
-	go func() {
-		wg.Wait()
-		close(errChan)
-	}()
+	// 等待所有钩子完成，或上下文超时
+	results := make([]hookResult, 0, len(hooks))
+	completedCount := 0
 
-	var results []hookResult
-	for result := range errChan {
-		results = append(results, result)
+loop:
+	for completedCount < len(hooks) {
+		select {
+		case result, ok := <-errChan:
+			if !ok {
+				break loop
+			}
+			results = append(results, result)
+			completedCount++
+		case <-ctx.Done():
+			m.logger.Warn("Timeout waiting for hook group completion",
+				zap.Int("completed", completedCount),
+				zap.Int("total", len(hooks)),
+			)
+			break loop
+		}
 	}
 
 	return results

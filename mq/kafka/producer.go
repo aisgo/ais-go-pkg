@@ -42,6 +42,8 @@ type ProducerAdapter struct {
 	wg            sync.WaitGroup
 	closed        bool
 	mu            sync.RWMutex
+	ctx           context.Context
+	cancel        context.CancelFunc
 }
 
 // NewProducerAdapter 创建 Kafka 生产者适配器
@@ -71,10 +73,14 @@ func NewProducerAdapter(cfg *mq.Config, logger *zap.Logger) (mq.Producer, error)
 		return nil, fmt.Errorf("failed to create kafka async producer: %w", err)
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	adapter := &ProducerAdapter{
 		syncProducer:  syncProducer,
 		asyncProducer: asyncProducer,
 		logger:        logger,
+		ctx:           ctx,
+		cancel:        cancel,
 	}
 
 	// 启动异步错误处理
@@ -111,6 +117,8 @@ func (p *ProducerAdapter) handleAsyncErrors() {
 				zap.Int32("partition", msg.Partition),
 				zap.Int64("offset", msg.Offset),
 			)
+		case <-p.ctx.Done():
+			return
 		}
 	}
 }
@@ -186,6 +194,8 @@ func (p *ProducerAdapter) Close() error {
 	if err := p.asyncProducer.Close(); err != nil {
 		errs = append(errs, fmt.Errorf("async producer close error: %w", err))
 	}
+	// 确保后台 goroutine 退出
+	p.cancel()
 
 	if err := p.syncProducer.Close(); err != nil {
 		errs = append(errs, fmt.Errorf("sync producer close error: %w", err))
