@@ -50,6 +50,11 @@ func New() *Validator {
 	}
 }
 
+// RegisterValidation 注册自定义验证规则
+func (v *Validator) RegisterValidation(tag string, fn validator.Func, callValidationEvenIfNull ...bool) error {
+	return v.validator.RegisterValidation(tag, fn, callValidationEvenIfNull...)
+}
+
 // Validate 验证结构体
 // 返回 ValidationError 类型，包含按字段分组的错误消息
 func (v *Validator) Validate(s any) error {

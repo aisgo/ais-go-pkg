@@ -3,6 +3,7 @@ package errors
 import (
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/gofiber/fiber/v3"
 	"google.golang.org/grpc/codes"
@@ -250,6 +251,44 @@ var httpStatusCode = map[ErrorCode]int{
 	ErrCodeCanceled:         499,
 }
 
+var (
+	httpStatusMu         sync.RWMutex
+	httpStatusOverrides  = make(map[ErrorCode]int)
+	httpStatusResolverFn func(ErrorCode) (int, bool)
+)
+
+// RegisterHTTPStatus 注册业务错误码与 HTTP 状态码映射
+func RegisterHTTPStatus(code ErrorCode, status int) {
+	httpStatusMu.Lock()
+	defer httpStatusMu.Unlock()
+	httpStatusOverrides[code] = status
+}
+
+// SetHTTPStatusResolver 设置自定义的 HTTP 状态码解析器
+// 解析器返回 (status, true) 表示命中，否则继续使用默认映射。
+func SetHTTPStatusResolver(resolver func(ErrorCode) (int, bool)) {
+	httpStatusMu.Lock()
+	defer httpStatusMu.Unlock()
+	httpStatusResolverFn = resolver
+}
+
+func resolveHTTPStatus(code ErrorCode) (int, bool) {
+	httpStatusMu.RLock()
+	if status, ok := httpStatusOverrides[code]; ok {
+		httpStatusMu.RUnlock()
+		return status, true
+	}
+	resolver := httpStatusResolverFn
+	httpStatusMu.RUnlock()
+
+	if resolver != nil {
+		if status, ok := resolver(code); ok {
+			return status, true
+		}
+	}
+	return 0, false
+}
+
 // HTTPResponse HTTP 响应结构
 type HTTPResponse struct {
 	Code int    `json:"code"`
@@ -265,9 +304,12 @@ func ToHTTPResponse(err error) (int, fiber.Map) {
 
 	var bizErr *BizError
 	if errors.As(err, &bizErr) {
-		statusCode, ok := httpStatusCode[bizErr.Code]
+		statusCode, ok := resolveHTTPStatus(bizErr.Code)
 		if !ok {
-			statusCode = 500
+			statusCode, ok = httpStatusCode[bizErr.Code]
+			if !ok {
+				statusCode = 500
+			}
 		}
 		return statusCode, fiber.Map{
 			"code": int(bizErr.Code),

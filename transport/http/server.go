@@ -26,6 +26,7 @@ import (
 // Config HTTP 服务器配置
 type Config struct {
 	Port         int           `yaml:"port"`
+	Host         string        `yaml:"host"`
 	AppName      string        `yaml:"app_name"`
 	ReadTimeout  time.Duration `yaml:"read_timeout"`
 	WriteTimeout time.Duration `yaml:"write_timeout"`
@@ -76,12 +77,19 @@ type ListenOptions struct {
 // 用于配置那些无法通过 YAML 序列化的高级选项（如回调函数、context 等）
 type ListenConfigCustomizer func(*fiber.ListenConfig)
 
+// AppConfigCustomizer 自定义 Fiber Config
+// 用于配置 Fiber ErrorHandler 或其他高级选项
+type AppConfigCustomizer func(*fiber.Config)
+
 type ServerParams struct {
 	fx.In
 	Lc     fx.Lifecycle
 	Config Config
 	Logger *logger.Logger
 	DB     *gorm.DB `optional:"true"` // 用于健康检查，可选
+
+	// ErrorHandler 可选的 Fiber ErrorHandler
+	ErrorHandler fiber.ErrorHandler `optional:"true"`
 
 	// ListenConfigCustomizer 可选的 ListenConfig 自定义函数
 	// 使用此函数可以设置更高级的配置，如：
@@ -91,6 +99,9 @@ type ServerParams struct {
 	//   - BeforeServeFunc: 服务启动前的回调
 	//   - AutoCertManager: ACME 自动证书管理器
 	ListenConfigCustomizer ListenConfigCustomizer `optional:"true"`
+
+	// AppConfigCustomizer 可选的 Fiber Config 自定义函数
+	AppConfigCustomizer AppConfigCustomizer `optional:"true"`
 }
 
 // NewHTTPServer 创建 HTTP 服务器并注册生命周期
@@ -113,12 +124,21 @@ func NewHTTPServer(p ServerParams) *fiber.App {
 		appName = "AIS Go App"
 	}
 
-	app := fiber.New(fiber.Config{
+	appConfig := fiber.Config{
 		AppName:      appName,
 		ReadTimeout:  readTimeout,
 		WriteTimeout: writeTimeout,
 		IdleTimeout:  idleTimeout,
-	})
+	}
+
+	if p.AppConfigCustomizer != nil {
+		p.AppConfigCustomizer(&appConfig)
+	}
+	if p.ErrorHandler != nil {
+		appConfig.ErrorHandler = p.ErrorHandler
+	}
+
+	app := fiber.New(appConfig)
 
 	// 注册健康检查端点
 	registerHealthEndpoints(app, p.DB)
@@ -133,6 +153,9 @@ func NewHTTPServer(p ServerParams) *fiber.App {
 
 			go func() {
 				addr := fmt.Sprintf(":%d", p.Config.Port)
+				if p.Config.Host != "" {
+					addr = fmt.Sprintf("%s:%d", p.Config.Host, p.Config.Port)
+				}
 				p.Logger.Info("Starting HTTP Server", zap.String("addr", addr))
 
 				// 构建 ListenConfig
