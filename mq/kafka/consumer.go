@@ -39,15 +39,16 @@ func init() {
 
 // ConsumerAdapter Kafka 消费者适配器
 type ConsumerAdapter struct {
-	client   sarama.ConsumerGroup
-	logger   *zap.Logger
-	config   *mq.KafkaConfig
-	handlers map[string]mq.MessageHandler
-	topics   []string
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
-	mu       sync.RWMutex
-	ready    chan bool
+	client    sarama.ConsumerGroup
+	logger    *zap.Logger
+	config    *mq.KafkaConfig
+	handlers  map[string]mq.MessageHandler
+	topics    []string
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	mu        sync.RWMutex
+	ready     chan struct{}
+	readyOnce sync.Once
 }
 
 // NewConsumerAdapter 创建 Kafka 消费者适配器
@@ -81,74 +82,120 @@ func NewConsumerAdapter(cfg *mq.Config, logger *zap.Logger) (mq.Consumer, error)
 		config:   kafkaCfg,
 		handlers: make(map[string]mq.MessageHandler),
 		topics:   make([]string, 0),
-		ready:    make(chan bool),
+		ready:    make(chan struct{}),
 	}, nil
 }
 
 // Subscribe 订阅主题
 func (c *ConsumerAdapter) Subscribe(topic string, handler mq.MessageHandler) error {
+	if handler == nil {
+		return fmt.Errorf("handler is required")
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if _, exists := c.handlers[topic]; !exists {
+		c.topics = append(c.topics, topic)
+	}
 	c.handlers[topic] = handler
-	c.topics = append(c.topics, topic)
 
 	c.logger.Info("subscribed to topic", zap.String("topic", topic))
 	return nil
 }
 
+func (c *ConsumerAdapter) signalReady() {
+	c.readyOnce.Do(func() {
+		close(c.ready)
+	})
+}
+
 // Start 启动消费者
 func (c *ConsumerAdapter) Start() error {
-	c.mu.RLock()
-	topics := c.topics
-	c.mu.RUnlock()
+	c.mu.Lock()
+	if c.cancel != nil {
+		c.mu.Unlock()
+		return fmt.Errorf("consumer already started")
+	}
+	topics := append([]string(nil), c.topics...)
+	c.ready = make(chan struct{})
+	c.readyOnce = sync.Once{}
+	readyCh := c.ready
+	c.mu.Unlock()
 
 	if len(topics) == 0 {
 		return fmt.Errorf("no topics subscribed")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	c.mu.Lock()
 	c.cancel = cancel
+	c.mu.Unlock()
 
-	// 创建消费处理器
-	handler := &consumerGroupHandler{
-		adapter: c,
-		ready:   c.ready,
-	}
+	startErr := make(chan error, 1)
 
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
 
 		for {
+			// 每次 Consume 都使用新的 handler；rebalance 会导致 Consume 返回并重入循环
+			handler := &consumerGroupHandler{adapter: c}
+
 			// `Consume` 会在 rebalance 后重新调用
 			if err := c.client.Consume(ctx, topics, handler); err != nil {
 				if ctx.Err() != nil {
 					return
 				}
 				c.logger.Error("consumer error", zap.Error(err))
+
+				// 防止 CPU 空转 (Busy Loop)
+				// 如果是配置错误或 Broker 宕机，Consume 可能立即返回
+				time.Sleep(2 * time.Second)
+
+				select {
+				case <-readyCh:
+					// 已经启动完成：不影响启动流程
+				default:
+					// 启动阶段出错：尽快反馈给 Start()
+					select {
+					case startErr <- err:
+					default:
+					}
+				}
 			}
 
 			// 检查上下文是否取消
 			if ctx.Err() != nil {
 				return
 			}
-
-			c.ready = make(chan bool)
 		}
 	}()
 
 	// 等待消费者准备就绪
-	<-c.ready
-
-	c.logger.Info("Kafka consumer started", zap.Strings("topics", topics))
-	return nil
+	select {
+	case <-readyCh:
+		c.logger.Info("Kafka consumer started", zap.Strings("topics", topics))
+		return nil
+	case err := <-startErr:
+		cancel()
+		c.wg.Wait()
+		return err
+	case <-time.After(30 * time.Second):
+		cancel()
+		c.wg.Wait()
+		return fmt.Errorf("kafka consumer start timeout")
+	}
 }
 
 // Close 关闭消费者
 func (c *ConsumerAdapter) Close() error {
-	if c.cancel != nil {
-		c.cancel()
+	c.mu.Lock()
+	cancel := c.cancel
+	c.cancel = nil
+	c.mu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
 
 	c.wg.Wait()
@@ -168,11 +215,10 @@ func (c *ConsumerAdapter) Close() error {
 
 type consumerGroupHandler struct {
 	adapter *ConsumerAdapter
-	ready   chan bool
 }
 
 func (h *consumerGroupHandler) Setup(session sarama.ConsumerGroupSession) error {
-	close(h.ready)
+	h.adapter.signalReady()
 	h.adapter.logger.Debug("consumer group setup",
 		zap.Int32("generation_id", session.GenerationID()),
 	)
@@ -210,12 +256,19 @@ func (h *consumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession,
 
 			// 带重试的消息处理
 			var lastErr error
+			var finalResult mq.ConsumeResult
 
 			for retry := 0; retry < defaultMaxRetries; retry++ {
-				_, lastErr = handler(session.Context(), []*mq.ConsumedMessage{convertedMsg})
-				if lastErr == nil {
+				result, err := handler(session.Context(), []*mq.ConsumedMessage{convertedMsg})
+				if err == nil && result != mq.ConsumeRetryLater {
+					finalResult = result
+					lastErr = nil
 					break
 				}
+				if err == nil {
+					err = fmt.Errorf("consume retry later")
+				}
+				lastErr = err
 
 				h.adapter.logger.Warn("message handling failed, retrying",
 					zap.String("topic", topic),
@@ -223,7 +276,7 @@ func (h *consumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession,
 					zap.Int64("offset", msg.Offset),
 					zap.Int("retry", retry+1),
 					zap.Int("max_retries", defaultMaxRetries),
-					zap.Error(lastErr),
+					zap.Error(err),
 				)
 
 				// 指数退避
@@ -248,6 +301,9 @@ func (h *consumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession,
 
 			// 只有成功处理才标记消息已消费
 			session.MarkMessage(msg, "")
+			if finalResult == mq.ConsumeCommit {
+				session.Commit()
+			}
 
 		case <-session.Context().Done():
 			return nil

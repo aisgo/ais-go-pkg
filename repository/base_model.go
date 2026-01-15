@@ -34,8 +34,3 @@ func (m *BaseModel) BeforeCreate(tx *gorm.DB) error {
 	}
 	return nil
 }
-
-// TableName 返回默认表名（可被子类覆盖）
-func (BaseModel) TableName() string {
-	return "" // 使用 GORM 默认表名
-}

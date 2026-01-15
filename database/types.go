@@ -14,7 +14,7 @@ import (
  * ======================================================================== */
 
 // JSONB 自定义类型，用于 Gorm 映射 PostgreSQL JSONB
-type JSONB map[string]interface{}
+type JSONB map[string]any
 
 // Value 实现 driver.Valuer 接口
 func (j JSONB) Value() (driver.Value, error) {
@@ -25,7 +25,7 @@ func (j JSONB) Value() (driver.Value, error) {
 }
 
 // Scan 实现 sql.Scanner 接口
-func (j *JSONB) Scan(value interface{}) error {
+func (j *JSONB) Scan(value any) error {
 	if value == nil {
 		*j = make(JSONB)
 		return nil
@@ -58,8 +58,8 @@ func (j JSONB) ToStringMap() map[string]string {
 				result[k] = "false"
 			}
 		default:
-			if bytes, err := json.Marshal(v); err == nil {
-				result[k] = string(bytes)
+			if b, err := json.Marshal(v); err == nil {
+				result[k] = string(b)
 			}
 		}
 	}

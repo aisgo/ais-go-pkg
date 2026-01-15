@@ -44,6 +44,9 @@ type ClientParams struct {
 
 // NewClient 创建 Redis 客户端
 func NewClient(p ClientParams) *Client {
+	if p.Logger == nil {
+		p.Logger = logger.NewNop()
+	}
 	rdb := redis.NewClient(&redis.Options{
 		Addr:         fmt.Sprintf("%s:%d", p.Config.Host, p.Config.Port),
 		Password:     p.Config.Password,
@@ -93,12 +96,12 @@ func (c *Client) Get(ctx context.Context, key string) (string, error) {
 }
 
 // Set 设置缓存
-func (c *Client) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
+func (c *Client) Set(ctx context.Context, key string, value any, expiration time.Duration) error {
 	return c.rdb.Set(ctx, key, value, expiration).Err()
 }
 
 // SetNX 设置缓存 (如果不存在)
-func (c *Client) SetNX(ctx context.Context, key string, value interface{}, expiration time.Duration) (bool, error) {
+func (c *Client) SetNX(ctx context.Context, key string, value any, expiration time.Duration) (bool, error) {
 	return c.rdb.SetNX(ctx, key, value, expiration).Result()
 }
 
@@ -127,7 +130,7 @@ func (c *Client) HGet(ctx context.Context, key, field string) (string, error) {
 }
 
 // HSet 设置 Hash 字段
-func (c *Client) HSet(ctx context.Context, key string, values ...interface{}) error {
+func (c *Client) HSet(ctx context.Context, key string, values ...any) error {
 	return c.rdb.HSet(ctx, key, values...).Err()
 }
 

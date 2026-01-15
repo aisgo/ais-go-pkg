@@ -28,10 +28,9 @@ type Lock struct {
 	value        string // 唯一标识，防止误删
 	ttl          time.Duration
 	defaultOpt   LockOption
-	stopChan     chan struct{} // 用于停止续期 goroutine
-	stopOnce     sync.Once     // 确保 stopChan 只关闭一次
 	extendCtx    context.Context
 	extendCancel context.CancelFunc
+	stopOnce     sync.Once  // 确保只停止一次
 	mu           sync.Mutex // 保护 extendCtx 和 extendCancel
 }
 
@@ -68,7 +67,6 @@ func (c *Client) NewLock(key string, opts ...LockOption) *Lock {
 		value:      uuid.New().String(),
 		ttl:        opt.TTL,
 		defaultOpt: opt,
-		stopChan:   make(chan struct{}),
 	}
 }
 
@@ -90,10 +88,7 @@ func (l *Lock) AcquireWithOption(ctx context.Context, opt LockOption) error {
 		if ok {
 			// 如果开启自动续期，启动续期 goroutine
 			if opt.AutoExtend {
-				l.mu.Lock()
-				l.extendCtx, l.extendCancel = context.WithCancel(context.Background())
-				go l.autoExtendLoop(l.extendCtx, opt.ExtendFactor)
-				l.mu.Unlock()
+				l.startAutoExtend(opt.ExtendFactor)
 			}
 			return nil
 		}
@@ -109,51 +104,99 @@ func (l *Lock) AcquireWithOption(ctx context.Context, opt LockOption) error {
 	return ErrLockFailed
 }
 
+// startAutoExtend 启动自动续期（线程安全）
+func (l *Lock) startAutoExtend(extendFactor float64) {
+	// 先停止旧的续期 goroutine（如果存在）
+	l.stopAutoExtend()
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	// 创建新的 context
+	l.extendCtx, l.extendCancel = context.WithCancel(context.Background())
+	// 重置 stopOnce，允许再次停止
+	l.stopOnce = sync.Once{}
+
+	go l.autoExtendLoop(l.extendCtx, extendFactor)
+}
+
+// stopAutoExtend 停止自动续期（线程安全）
+func (l *Lock) stopAutoExtend() {
+	l.mu.Lock()
+	cancel := l.extendCancel
+	l.mu.Unlock()
+
+	if cancel != nil {
+		l.stopOnce.Do(func() {
+			cancel()
+		})
+	}
+}
+
 // autoExtendLoop 自动续期循环
 func (l *Lock) autoExtendLoop(ctx context.Context, extendFactor float64) {
 	// 计算续期间隔
 	interval := time.Duration(float64(l.ttl) * extendFactor)
+
+	// 添加最大生命周期保护（防止无限续期导致 goroutine 泄漏）
+	maxLifetime := l.ttl * 100 // 最多续期到 TTL 的 100 倍
+	deadlineCtx, deadlineCancel := context.WithTimeout(ctx, maxLifetime)
+	defer deadlineCancel()
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-deadlineCtx.Done():
+			// 超过最大生命周期或被取消
 			return
-		case <-l.stopChan:
-			return
-		case <-ticker.C:
-			extendCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			err := l.Extend(extendCtx, l.ttl)
-			cancel()
 
-			if err != nil {
-				if errors.Is(err, ErrLockFailed) {
-					// 锁已过期或被其他进程夺取，停止续期
-					return
-				}
-				// 网络抖动或其他 Redis 错误，记录日志并继续下一次重试
-				// 不直接 return，防止在短暂网络故障下锁意外失效
+		case <-ticker.C:
+			// 尝试续期
+			if !l.tryExtend(deadlineCtx) {
+				// 续期失败，可能锁已丢失
+				return
 			}
 		}
 	}
+}
+
+// tryExtend 尝试续期，返回是否应继续
+func (l *Lock) tryExtend(ctx context.Context) bool {
+	for i := 0; i < 3; i++ {
+		extendCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		err := l.Extend(extendCtx, l.ttl)
+		cancel()
+
+		if err == nil {
+			return true
+		}
+
+		// 锁已丢失或上下文已取消
+		if errors.Is(err, ErrLockFailed) || errors.Is(err, context.Canceled) {
+			return false
+		}
+
+		// 临时错误，指数退避
+		backoff := time.Duration(100*(1<<i)) * time.Millisecond
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(backoff):
+			continue
+		}
+	}
+
+	// 重试多次仍失败
+	return false
 }
 
 // Release 释放锁
 // 使用 Lua 脚本保证原子性：只有持有锁的人才能释放
 func (l *Lock) Release(ctx context.Context) error {
 	// 停止自动续期 goroutine
-	l.mu.Lock()
-	if l.extendCancel != nil {
-		l.extendCancel()
-	}
-	l.mu.Unlock()
-
-	// 停止自动续期 (确保只关闭一次)
-	l.stopOnce.Do(func() {
-		close(l.stopChan)
-	})
+	l.stopAutoExtend()
 
 	// Lua 脚本: 如果 value 匹配则删除
 	script := `

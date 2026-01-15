@@ -36,6 +36,11 @@ type Validator struct {
 	mu            sync.RWMutex
 }
 
+type visitKey struct {
+	typ reflect.Type
+	ptr uintptr
+}
+
 // New 创建新的验证器
 func New() *Validator {
 	return &Validator{
@@ -47,13 +52,21 @@ func New() *Validator {
 
 // Validate 验证结构体
 // 返回 ValidationError 类型，包含按字段分组的错误消息
-func (v *Validator) Validate(s interface{}) error {
+func (v *Validator) Validate(s any) error {
 	if s == nil {
 		return nil
 	}
 
+	// 允许传入 struct 值：转为可寻址的指针，避免 field.Addr() panic
+	rv := reflect.ValueOf(s)
+	if rv.Kind() == reflect.Struct {
+		ptr := reflect.New(rv.Type())
+		ptr.Elem().Set(rv)
+		s = ptr.Interface()
+	}
+
 	validationErrors := &ValidationError{Errors: make(map[string][]string)}
-	visited := make(map[uintptr]bool)
+	visited := make(map[visitKey]bool)
 	v.validateRecursive(s, "", validationErrors, visited)
 
 	if validationErrors.HasErrors() {
@@ -63,7 +76,7 @@ func (v *Validator) Validate(s interface{}) error {
 }
 
 // validateRecursive 递归验证结构体
-func (v *Validator) validateRecursive(s interface{}, prefix string, validationErrors *ValidationError, visited map[uintptr]bool) {
+func (v *Validator) validateRecursive(s any, prefix string, validationErrors *ValidationError, visited map[visitKey]bool) {
 	value := reflect.ValueOf(s)
 
 	// 如果是指针，记录并检查是否已访问
@@ -71,11 +84,11 @@ func (v *Validator) validateRecursive(s interface{}, prefix string, validationEr
 		if value.IsNil() {
 			return
 		}
-		ptr := value.Pointer()
-		if visited[ptr] {
+		key := visitKey{typ: value.Type(), ptr: value.Pointer()}
+		if visited[key] {
 			return // 防止循环引用
 		}
-		visited[ptr] = true
+		visited[key] = true
 		value = value.Elem()
 	}
 

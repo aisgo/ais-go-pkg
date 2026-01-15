@@ -76,7 +76,7 @@ func (r *RepositoryImpl[T]) FindPageWithOpts(ctx context.Context, page, pageSize
 
 // FindPageByModel 根据模型条件分页查询
 // 用于复杂的 WHERE 条件场景
-func (r *RepositoryImpl[T]) FindPageByModel(ctx context.Context, page, pageSize int, model interface{}, opts ...Option) (*PageResult[T], error) {
+func (r *RepositoryImpl[T]) FindPageByModel(ctx context.Context, page, pageSize int, model any, opts ...Option) (*PageResult[T], error) {
 	// 参数校验
 	if page < 1 {
 		page = 1

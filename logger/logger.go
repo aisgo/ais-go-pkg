@@ -2,6 +2,7 @@ package logger
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"go.uber.org/zap"
@@ -32,7 +33,12 @@ func NewLogger(cfg Config) *Logger {
 	// 解析日志级别
 	level := zap.InfoLevel
 	if cfg.Level != "" {
-		_ = level.UnmarshalText([]byte(cfg.Level))
+		if err := level.UnmarshalText([]byte(cfg.Level)); err != nil {
+			// 使用 stderr 输出警告（此时 logger 还未初始化）
+			fmt.Fprintf(os.Stderr,
+				"[WARN] Invalid log level %q, using INFO as default: %v\n",
+				cfg.Level, err)
+		}
 	}
 
 	encoderConfig := zap.NewProductionEncoderConfig()
@@ -47,9 +53,19 @@ func NewLogger(cfg Config) *Logger {
 		encoder = zapcore.NewJSONEncoder(encoderConfig)
 	}
 
-	// 配置输出 (简化实现，始终输出到 stdout)
-	var writer zapcore.WriteSyncer
-	writer = zapcore.AddSync(os.Stdout)
+	// 配置输出
+	writer := zapcore.AddSync(os.Stdout)
+	if cfg.Output != "" && cfg.Output != "stdout" {
+		// 如果指定了文件输出，尝试打开文件
+		file, err := os.OpenFile(cfg.Output, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			fmt.Fprintf(os.Stderr,
+				"[WARN] Failed to open log file %q, using stdout: %v\n",
+				cfg.Output, err)
+		} else {
+			writer = zapcore.AddSync(file)
+		}
+	}
 
 	core := zapcore.NewCore(
 		encoder,
@@ -59,6 +75,29 @@ func NewLogger(cfg Config) *Logger {
 
 	logger := zap.New(core, zap.AddCaller())
 	return &Logger{Logger: logger}
+}
+
+// ValidateConfig 验证配置（可在初始化前调用）
+func ValidateConfig(cfg Config) error {
+	// 验证日志级别
+	if cfg.Level != "" {
+		var level zapcore.Level
+		if err := level.UnmarshalText([]byte(cfg.Level)); err != nil {
+			return fmt.Errorf("invalid log level %q: %w", cfg.Level, err)
+		}
+	}
+
+	// 验证格式
+	if cfg.Format != "" && cfg.Format != "json" && cfg.Format != "console" {
+		return fmt.Errorf("invalid log format %q, must be 'json' or 'console'", cfg.Format)
+	}
+
+	return nil
+}
+
+// NewNop 返回一个 no-op Logger（用于可选依赖/测试）
+func NewNop() *Logger {
+	return &Logger{Logger: zap.NewNop()}
 }
 
 // WithContext 从 Context 提取 TraceID (后续实现) 并注入 Logger

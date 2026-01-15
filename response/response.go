@@ -20,7 +20,7 @@ import (
  * ======================================================================== */
 
 // newResp 创建响应对象
-func newResp(code int, msg string, data interface{}) *Result {
+func newResp(code int, msg string, data any) *Result {
 	resp := &Result{
 		Code: code,
 		Msg:  msg,
@@ -37,9 +37,17 @@ func newResp(code int, msg string, data interface{}) *Result {
 	return resp
 }
 
+// normalizeHTTPStatusCode 规范化 HTTP 状态码到有效范围 (100-599)
+func normalizeHTTPStatusCode(code int) int {
+	if code > 599 || code < 100 {
+		return http.StatusInternalServerError
+	}
+	return code
+}
+
 // respJSONWithStatusCode 返回 JSON 响应
-func respJSONWithStatusCode(c fiber.Ctx, code int, msg string, data ...interface{}) error {
-	var firstData interface{}
+func respJSONWithStatusCode(c fiber.Ctx, code int, msg string, data ...any) error {
+	var firstData any
 	if len(data) > 0 {
 		firstData = data[0]
 	}
@@ -48,10 +56,7 @@ func respJSONWithStatusCode(c fiber.Ctx, code int, msg string, data ...interface
 	resp := newResp(code, msg, firstData)
 
 	// 确保 HTTP 协议层的状态码在有效范围内 (100-599)
-	httpStatusCode := code
-	if httpStatusCode > 599 || httpStatusCode < 100 {
-		httpStatusCode = http.StatusInternalServerError
-	}
+	httpStatusCode := normalizeHTTPStatusCode(code)
 
 	return c.Status(httpStatusCode).JSON(resp)
 }
@@ -66,17 +71,17 @@ func Ok(c fiber.Ctx) error {
 }
 
 // OkWithData 返回成功响应（带数据）
-func OkWithData(c fiber.Ctx, data interface{}) error {
+func OkWithData(c fiber.Ctx, data any) error {
 	return respJSONWithStatusCode(c, http.StatusOK, "ok", data)
 }
 
 // OkWithMsg 返回成功响应（自定义消息）
-func OkWithMsg(c fiber.Ctx, msg string, data ...interface{}) error {
+func OkWithMsg(c fiber.Ctx, msg string, data ...any) error {
 	return respJSONWithStatusCode(c, http.StatusOK, msg, data...)
 }
 
 // Success 返回成功响应（自定义消息和数据）
-func Success(c fiber.Ctx, msg string, data interface{}) error {
+func Success(c fiber.Ctx, msg string, data any) error {
 	return respJSONWithStatusCode(c, http.StatusOK, msg, data)
 }
 
@@ -93,10 +98,10 @@ func Error(c fiber.Ctx, err error) error {
 
 	// 检查是否为 BizError
 	if bizErr, ok := errors.AsBizError(err); ok {
-		statusCode, resp := errors.ToHTTPResponse(bizErr)
+		statusCode, _ := errors.ToHTTPResponse(bizErr)
 		return c.Status(statusCode).JSON(Result{
-			Code: resp["code"].(int),
-			Msg:  resp["msg"].(string),
+			Code: int(bizErr.Code),
+			Msg:  bizErr.Message,
 			Data: &struct{}{},
 		})
 	}
@@ -142,7 +147,7 @@ func ErrorWithMsg(c fiber.Ctx, msg string) error {
  * ======================================================================== */
 
 // PageData 返回分页数据
-func PageData(c fiber.Ctx, list interface{}, total int64, page, pageSize int) error {
+func PageData(c fiber.Ctx, list any, total int64, page, pageSize int) error {
 	pageResult := &PageResult{
 		List:     list,
 		Total:    total,

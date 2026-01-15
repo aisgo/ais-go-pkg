@@ -58,15 +58,16 @@ go get github.com/your-org/ais-go-pkg@v1.0.0
 
 ### 基础示例
 
+#### 方式一：直接调用（适合简单场景）
+
 ```go
 package main
 
-import (
-    "github.com/aisgo/ais-go-pkg/logger"
-    "github.com/aisgo/ais-go-pkg/database/postgres"
-    "github.com/aisgo/ais-go-pkg/cache/redis"
-    "go.uber.org/zap"
-)
+	import (
+	    "github.com/aisgo/ais-go-pkg/logger"
+	    "github.com/aisgo/ais-go-pkg/database/postgres"
+	    "go.uber.org/zap"
+	)
 
 func main() {
     // ================================================================
@@ -91,16 +92,91 @@ func main() {
         log.Fatal("failed to connect database", zap.Error(err))
     }
     
-    // ================================================================
-    // 初始化 Redis
-    // ================================================================
-    rdb := redis.NewClient(redis.ClientParams{
-        Addr:     "localhost:6379",
-        Password: "",
-        DB:       0,
-    })
+	    // 其他组件（Redis/MQ/Transport 等）请参考下方“组件详解”中的示例
+
+	    log.Info("application started successfully")
+	}
+```
+
+#### 方式二：使用 Fx 模块（推荐，适合复杂应用）
+
+```go
+package main
+
+import (
+    "github.com/aisgo/ais-go-pkg/cache"
+    "github.com/aisgo/ais-go-pkg/cache/redis"
+    "github.com/aisgo/ais-go-pkg/database/postgres"
+    "github.com/aisgo/ais-go-pkg/logger"
+    "github.com/aisgo/ais-go-pkg/mq"
+    "github.com/aisgo/ais-go-pkg/transport/http"
+    "github.com/gofiber/fiber/v3"
+    "go.uber.org/fx"
+    "gorm.io/gorm"
+)
+
+func main() {
+    app := fx.New(
+        // ================================================================
+        // 配置提供
+        // ================================================================
+        fx.Provide(
+            func() logger.Config {
+                return logger.Config{Level: "info", Format: "json"}
+            },
+            func() postgres.Config {
+                return postgres.Config{
+                    Host:     "localhost",
+                    Port:     5432,
+                    User:     "user",
+                    Password: "pass",
+                    DBName:   "mydb",
+                }
+            },
+            func() redis.Config {
+                return redis.Config{
+                    Host: "localhost",
+                    Port: 6379,
+                }
+            },
+            func() *mq.Config {
+                return &mq.Config{
+                    Type: mq.TypeKafka,
+                    Kafka: &mq.KafkaConfig{
+                        Brokers: []string{"localhost:9092"},
+                    },
+                }
+            },
+            // HTTP Server 通过 NewHTTPServer 提供，无需 Module
+            func() http.Config {
+                return http.Config{Port: 8080}
+            },
+            http.NewHTTPServer,
+        ),
+        
+        // ================================================================
+        // 导入组件模块
+        // ================================================================
+        logger.Module,
+        postgres.Module,
+        cache.Module,
+        mq.Module,
+        
+        // ================================================================
+        // 业务逻辑
+        // ================================================================
+        fx.Invoke(func(
+            log *logger.Logger,
+            db *gorm.DB,
+            fiberApp *fiber.App,
+            // 其他依赖会自动注入
+        ) {
+            log.Info("application started successfully")
+            // 使用 db、fiberApp 等组件...
+        }),
+    )
     
-    log.Info("application started successfully")
+    app.Run()
 }
 ```
 
@@ -111,6 +187,8 @@ func main() {
 ### 🪵 Logger - 结构化日志
 
 基于 Zap 的高性能日志组件，支持 JSON 和 Console 格式。
+
+#### 直接使用
 
 ```go
 import "github.com/aisgo/ais-go-pkg/logger"
@@ -127,9 +205,30 @@ log.Info("user login",
 )
 ```
 
+#### 使用 Fx 模块
+
+```go
+import (
+    "github.com/aisgo/ais-go-pkg/logger"
+    "go.uber.org/fx"
+)
+
+app := fx.New(
+    fx.Provide(func() logger.Config {
+        return logger.Config{Level: "info", Format: "json"}
+    }),
+    logger.Module,
+    fx.Invoke(func(log *logger.Logger) {
+        log.Info("application started")
+    }),
+)
+```
+
 ### 🗄️ Database - PostgreSQL + GORM
 
 预配置连接池和日志适配器。
+
+#### 直接使用
 
 ```go
 import "github.com/aisgo/ais-go-pkg/database/postgres"
@@ -153,47 +252,128 @@ type User struct {
 db.AutoMigrate(&User{})
 ```
 
+#### 使用 Fx 模块
+
+```go
+import (
+    "github.com/aisgo/ais-go-pkg/database/postgres"
+    "github.com/aisgo/ais-go-pkg/logger"
+    "go.uber.org/fx"
+    "gorm.io/gorm"
+)
+
+app := fx.New(
+    fx.Provide(
+        func() logger.Config { return logger.Config{Level: "info"} },
+        func() postgres.Config {
+            return postgres.Config{
+                Host:   "localhost",
+                Port:   5432,
+                User:   "postgres",
+                DBName: "mydb",
+            }
+        },
+    ),
+    logger.Module,
+    postgres.Module,
+    fx.Invoke(func(db *gorm.DB) {
+        // 使用 db...
+    }),
+)
+```
+
 ### 💾 Cache - Redis 客户端
 
 封装 go-redis/v9，提供分布式锁实现。
 
-```go
-import "github.com/aisgo/ais-go-pkg/cache/redis"
+#### 直接使用
 
-client := redis.NewClient(redis.ClientParams{
-    Addr:         "localhost:6379",
+```go
+import (
+    "context"
+    "time"
+    "github.com/aisgo/ais-go-pkg/cache/redis"
+    "github.com/aisgo/ais-go-pkg/logger"
+)
+
+log := logger.NewLogger(logger.Config{Level: "info"})
+client := redis.NewClient(redis.Config{
+    Host:         "localhost",
+    Port:         6379,
     Password:     "",
     DB:           0,
     PoolSize:     10,
     MinIdleConns: 5,
-})
+}, log)
 
-// 基础操作
-client.Set(ctx, "key", "value", time.Hour)
-val, _ := client.Get(ctx, "key")
+ctx := context.Background()
+_ = client.Set(ctx, "key", "value", time.Hour)
+_, _ = client.Get(ctx, "key")
 
 // 分布式锁
 lock := client.NewLock("resource:order:123")
-if lock.Acquire(ctx) {
+if err := lock.Acquire(ctx); err == nil {
     defer lock.Release(ctx)
     // 临界区代码
 }
+```
+
+#### 使用 Fx 模块
+
+```go
+import (
+    "context"
+    "time"
+    "github.com/aisgo/ais-go-pkg/cache"
+    "github.com/aisgo/ais-go-pkg/cache/redis"
+    "github.com/aisgo/ais-go-pkg/logger"
+    "go.uber.org/fx"
+)
+
+app := fx.New(
+    fx.Provide(
+        func() logger.Config { return logger.Config{Level: "info"} },
+        func() redis.Config {
+            return redis.Config{
+                Host:         "localhost",
+                Port:         6379,
+                PoolSize:     10,
+                MinIdleConns: 5,
+            }
+        },
+    ),
+    logger.Module,
+    cache.Module,
+    fx.Invoke(func(client *redis.Client) {
+        ctx := context.Background()
+        _ = client.Set(ctx, "key", "value", time.Hour)
+        
+        // 分布式锁
+        lock := client.NewLock("resource:order:123")
+        if err := lock.Acquire(ctx); err == nil {
+            defer lock.Release(ctx)
+            // 临界区代码
+        }
+    }),
+)
 ```
 
 ### 📨 MQ - 消息队列抽象层
 
 统一接口，支持 Kafka 和 RocketMQ 无缝切换。
 
+#### 直接使用
+
 ```go
 import (
+    "context"
     "github.com/aisgo/ais-go-pkg/mq"
     _ "github.com/aisgo/ais-go-pkg/mq/kafka"     // 注册 Kafka 实现
     _ "github.com/aisgo/ais-go-pkg/mq/rocketmq"  // 注册 RocketMQ 实现
+    "go.uber.org/zap"
 )
 
-// ================================================================
 // 配置驱动 - 自动选择实现
-// ================================================================
 cfg := &mq.Config{
     Type: mq.TypeKafka,
     Kafka: &mq.KafkaConfig{
@@ -201,25 +381,53 @@ cfg := &mq.Config{
     },
 }
 
-producer, _ := mq.NewProducer(cfg, logger)
+producer, _ := mq.NewProducer(cfg, zap.NewNop())
 
-// ================================================================
 // 发送消息
-// ================================================================
 msg := mq.NewMessage("order-events", []byte(`{"order_id": 123}`)).
     WithKey("order-123").
-    WithHeader("trace-id", "abc123")
+    WithProperty("trace-id", "abc123")
+_, _ = producer.SendSync(context.Background(), msg)
 
-err := producer.SendSync(ctx, msg)
-
-// ================================================================
 // 消费消息
-// ================================================================
-consumer, _ := mq.NewConsumer(cfg, logger)
-consumer.Subscribe(ctx, []string{"order-events"}, func(msg *mq.Message) error {
-    log.Info("received", zap.ByteString("body", msg.Body))
-    return nil
+consumer, _ := mq.NewConsumer(cfg, zap.NewNop())
+_ = consumer.Subscribe("order-events", func(ctx context.Context, msgs []*mq.ConsumedMessage) (mq.ConsumeResult, error) {
+    // TODO: 处理 msgs
+    return mq.ConsumeSuccess, nil
 })
+_ = consumer.Start()
+```
+
+#### 使用 Fx 模块
+
+```go
+import (
+    "context"
+    "github.com/aisgo/ais-go-pkg/logger"
+    "github.com/aisgo/ais-go-pkg/mq"
+    _ "github.com/aisgo/ais-go-pkg/mq/kafka"
+    "go.uber.org/fx"
+)
+
+app := fx.New(
+    fx.Provide(
+        func() logger.Config { return logger.Config{Level: "info"} },
+        func() *mq.Config {
+            return &mq.Config{
+                Type: mq.TypeKafka,
+                Kafka: &mq.KafkaConfig{
+                    Brokers: []string{"localhost:9092"},
+                },
+            }
+        },
+    ),
+    logger.Module,
+    mq.Module, // 自动提供 Producer 和 Consumer
+    fx.Invoke(func(producer mq.Producer, consumer mq.Consumer) {
+        // Producer 和 Consumer 会自动注入
+        // Consumer 会在应用启动时自动开始消费
+    }),
+)
 ```
 
 ### 🌐 Transport - HTTP/gRPC 服务器
@@ -227,38 +435,57 @@ consumer.Subscribe(ctx, []string{"order-events"}, func(msg *mq.Message) error {
 #### HTTP Server (Fiber v3)
 
 ```go
-import "github.com/aisgo/ais-go-pkg/transport/http"
+import (
+    aishttp "github.com/aisgo/ais-go-pkg/transport/http"
+    "github.com/aisgo/ais-go-pkg/logger"
+    "github.com/gofiber/fiber/v3"
+    "go.uber.org/fx"
+)
 
-server := http.NewHTTPServer(http.ServerParams{
-    Port:   8080,
-    Logger: log,
-})
-
-app := server.App()
-app.Get("/api/health", func(c *fiber.Ctx) error {
-    return c.JSON(fiber.Map{"status": "ok"})
-})
-
-server.Start()
+app := fx.New(
+    fx.Provide(
+        logger.NewNop,
+        func() aishttp.Config { return aishttp.Config{Port: 8080} },
+        aishttp.NewHTTPServer,
+    ),
+    fx.Invoke(func(fiberApp *fiber.App) {
+        fiberApp.Get("/api/health", func(c fiber.Ctx) error {
+            return c.JSON(fiber.Map{"status": "ok"})
+        })
+    }),
+)
+_ = app
 ```
 
 #### gRPC Server
 
 ```go
-import "github.com/aisgo/ais-go-pkg/transport/grpc"
+import (
+    aisgrpc "github.com/aisgo/ais-go-pkg/transport/grpc"
+    "github.com/aisgo/ais-go-pkg/logger"
+    "go.uber.org/fx"
+    "google.golang.org/grpc"
+)
 
-server := grpc.NewServer(grpc.ServerParams{
-    Port:   50051,
-    Logger: log,
-})
-
-// 注册服务
-pb.RegisterYourServiceServer(server.Server(), &yourService{})
-
-server.Start()
+app := fx.New(
+    fx.Provide(
+        logger.NewNop,
+        func() aisgrpc.Config { return aisgrpc.Config{Port: 50051, Mode: "microservice"} },
+        aisgrpc.NewInProcListener,
+        aisgrpc.NewListener,
+        aisgrpc.NewServer,
+    ),
+    fx.Invoke(func(s *grpc.Server) {
+        // 注册服务
+        // pb.RegisterYourServiceServer(s, &yourService{})
+    }),
+)
+_ = app
 ```
 
 ### 📊 Metrics - Prometheus 监控
+
+#### 直接使用
 
 ```go
 import "github.com/aisgo/ais-go-pkg/metrics"
@@ -270,6 +497,24 @@ requestDuration := metrics.NewHistogram("http_request_duration_seconds", "HTTP r
 // 使用
 requestCounter.Inc()
 requestDuration.Observe(0.05)
+```
+
+#### 使用 Fx 模块
+
+```go
+import (
+    "github.com/aisgo/ais-go-pkg/metrics"
+    "go.uber.org/fx"
+)
+
+app := fx.New(
+    metrics.Module,
+    fx.Invoke(func() {
+        // 注册指标
+        requestCounter := metrics.NewCounter("http_requests_total", "Total HTTP requests")
+        requestCounter.Inc()
+    }),
+)
 ```
 
 ### 🗂️ Repository - 数据仓储模式
@@ -302,6 +547,8 @@ page := repo.Paginate(ctx, repository.PageRequest{
 
 基于 validator/v10 的验证器封装。
 
+#### 直接使用
+
 ```go
 import "github.com/aisgo/ais-go-pkg/validator"
 
@@ -319,9 +566,27 @@ if err := v.Validate(req); err != nil {
 }
 ```
 
+#### 使用 Fx 模块
+
+```go
+import (
+    "github.com/aisgo/ais-go-pkg/validator"
+    "go.uber.org/fx"
+)
+
+app := fx.New(
+    validator.Module,
+    fx.Invoke(func(v *validator.Validator) {
+        // 使用验证器...
+    }),
+)
+```
+
 ### 🛑 Shutdown - 优雅关闭
 
 分优先级管理资源清理顺序。
+
+#### 直接使用
 
 ```go
 import "github.com/aisgo/ais-go-pkg/shutdown"
@@ -339,6 +604,25 @@ manager.Register(shutdown.PriorityMedium, func(ctx context.Context) error {
 
 // 等待信号并执行清理
 manager.Wait()
+```
+
+#### 使用 Fx 模块
+
+```go
+import (
+    "github.com/aisgo/ais-go-pkg/shutdown"
+    "go.uber.org/fx"
+)
+
+app := fx.New(
+    shutdown.Module,
+    fx.Invoke(func(manager *shutdown.Manager) {
+        // 注册清理函数
+        manager.Register(shutdown.PriorityHigh, func(ctx context.Context) error {
+            return httpServer.Shutdown(ctx)
+        })
+    }),
+)
 ```
 
 ---

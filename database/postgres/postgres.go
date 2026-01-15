@@ -1,12 +1,16 @@
 package postgres
 
 import (
+	"context"
 	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/aisgo/ais-go-pkg/database"
 	"github.com/aisgo/ais-go-pkg/logger"
 
+	"go.uber.org/fx"
+	"go.uber.org/zap"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -17,6 +21,14 @@ import (
  * 职责: 提供 PostgreSQL 连接池、GORM 集成
  * 技术: gorm.io/driver/postgres
  * ======================================================================== */
+
+// 默认连接池配置
+const (
+	DefaultMaxIdleConns    = 10
+	DefaultMaxOpenConns    = 25
+	DefaultConnMaxLifetime = 1 * time.Hour
+	DefaultConnMaxIdleTime = 20 * time.Minute
+)
 
 // Config PostgreSQL 配置
 type Config struct {
@@ -33,15 +45,38 @@ type Config struct {
 	ConnMaxIdleTime time.Duration `yaml:"conn_max_idle_time"` // 空闲连接最大时间
 }
 
-// NewDB 初始化 Postgres 连接
-func NewDB(cfg Config, log *logger.Logger) (*gorm.DB, error) {
-	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.DBName, cfg.SSLMode)
+// Params 依赖注入参数
+type Params struct {
+	fx.In
+	Lc     fx.Lifecycle
+	Config Config
+	Logger *logger.Logger
+}
 
-	// 如果配置了 schema，添加到 DSN
-	if cfg.Schema != "" {
-		dsn = fmt.Sprintf("%s search_path=%s", dsn, cfg.Schema)
+// NewDB 初始化 Postgres 连接
+func NewDB(p Params) (*gorm.DB, error) {
+	log := p.Logger
+	if log == nil {
+		log = logger.NewNop()
 	}
+	sslMode := p.Config.SSLMode
+	if sslMode == "" {
+		sslMode = "disable"
+	}
+
+	u := &url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(p.Config.User, p.Config.Password),
+		Host:   fmt.Sprintf("%s:%d", p.Config.Host, p.Config.Port),
+		Path:   p.Config.DBName,
+	}
+	q := u.Query()
+	q.Set("sslmode", sslMode)
+	if p.Config.Schema != "" {
+		q.Set("search_path", p.Config.Schema)
+	}
+	u.RawQuery = q.Encode()
+	dsn := u.String()
 
 	// 使用自定义的 ZapGormLogger
 	gormLog := database.NewZapGormLogger(log.Logger)
@@ -64,30 +99,38 @@ func NewDB(cfg Config, log *logger.Logger) (*gorm.DB, error) {
 	}
 
 	// 连接池配置（应用默认值）
-	maxIdleConns := cfg.MaxIdleConns
+	maxIdleConns := p.Config.MaxIdleConns
 	if maxIdleConns <= 0 {
-		maxIdleConns = 10
+		maxIdleConns = DefaultMaxIdleConns
 	}
 
-	maxOpenConns := cfg.MaxOpenConns
+	maxOpenConns := p.Config.MaxOpenConns
 	if maxOpenConns <= 0 {
-		maxOpenConns = 25
+		maxOpenConns = DefaultMaxOpenConns
 	}
 
-	connMaxLifetime := cfg.ConnMaxLifetime
+	connMaxLifetime := p.Config.ConnMaxLifetime
 	if connMaxLifetime <= 0 {
-		connMaxLifetime = 1 * time.Hour
+		connMaxLifetime = DefaultConnMaxLifetime
 	}
 
-	connMaxIdleTime := cfg.ConnMaxIdleTime
+	connMaxIdleTime := p.Config.ConnMaxIdleTime
 	if connMaxIdleTime <= 0 {
-		connMaxIdleTime = 20 * time.Minute
+		connMaxIdleTime = DefaultConnMaxIdleTime
 	}
 
 	sqlDB.SetMaxIdleConns(maxIdleConns)
 	sqlDB.SetMaxOpenConns(maxOpenConns)
 	sqlDB.SetConnMaxLifetime(connMaxLifetime)
 	sqlDB.SetConnMaxIdleTime(connMaxIdleTime)
+
+	// 注册生命周期钩子
+	p.Lc.Append(fx.Hook{
+		OnStop: func(ctx context.Context) error {
+			log.Info("Closing PostgreSQL connection pool", zap.String("db", p.Config.DBName))
+			return sqlDB.Close()
+		},
+	})
 
 	return db, nil
 }

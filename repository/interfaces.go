@@ -92,13 +92,14 @@ type CRUDRepository[T any] interface {
 	CreateBatch(ctx context.Context, models []*T, batchSize int) error
 
 	// Update 更新记录（根据主键）
+	// 注意: 使用 Save 语义，会更新所有字段（包括零值）
 	Update(ctx context.Context, model *T) error
 
 	// UpdateByID 根据 ID 更新指定字段
-	UpdateByID(ctx context.Context, id string, updates map[string]any) error
+	UpdateByID(ctx context.Context, id string, updates map[string]any, allowedFields ...string) error
 
-	// UpdateBatch 批量更新记录
-	UpdateBatch(ctx context.Context, models []*T) error
+	// UpsertBatch 批量更新或插入记录 (Upsert)
+	UpsertBatch(ctx context.Context, models []*T) error
 
 	// Delete 软删除记录（设置 deleted_at）
 	Delete(ctx context.Context, id string) error
@@ -163,7 +164,10 @@ type AggregateRepository[T any] interface {
 
 // TransactionRepository 事务支持接口
 type TransactionRepository[T any] interface {
-	// Transaction 在事务中执行操作
+	// Execute 在事务中执行操作（支持隐式事务传播）
+	Execute(ctx context.Context, fn func(ctx context.Context) error) error
+
+	// Transaction 在事务中执行操作 (Deprecated: Use Execute instead)
 	Transaction(ctx context.Context, fn func(tx *gorm.DB) error) error
 
 	// WithTx 创建事务版本的仓储

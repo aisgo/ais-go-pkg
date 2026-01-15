@@ -38,7 +38,6 @@ const (
 var (
 	globalNode *snowflake.Node
 	once       sync.Once
-	mu         sync.Mutex
 )
 
 // Generator ID 生成器

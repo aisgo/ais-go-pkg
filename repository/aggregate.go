@@ -122,7 +122,7 @@ func (r *RepositoryImpl[T]) CountByGroup(ctx context.Context, groupColumn, query
 	}
 
 	type Result struct {
-		Group string
+		Group string `gorm:"column:group_column"`
 		Count int64
 	}
 
@@ -152,7 +152,7 @@ func (r *RepositoryImpl[T]) CountByGroup(ctx context.Context, groupColumn, query
 
 // SumWithCondition 带条件的求和（推荐使用）
 // 使用结构体作为查询条件，更安全
-func (r *RepositoryImpl[T]) SumWithCondition(ctx context.Context, column string, where interface{}, opts ...Option) (float64, error) {
+func (r *RepositoryImpl[T]) SumWithCondition(ctx context.Context, column string, where any, opts ...Option) (float64, error) {
 	if err := validateColumn(column); err != nil {
 		return 0, err
 	}
@@ -173,7 +173,7 @@ func (r *RepositoryImpl[T]) SumWithCondition(ctx context.Context, column string,
 }
 
 // AvgWithCondition 带条件的平均值（推荐使用）
-func (r *RepositoryImpl[T]) AvgWithCondition(ctx context.Context, column string, where interface{}, opts ...Option) (float64, error) {
+func (r *RepositoryImpl[T]) AvgWithCondition(ctx context.Context, column string, where any, opts ...Option) (float64, error) {
 	if err := validateColumn(column); err != nil {
 		return 0, err
 	}
@@ -194,7 +194,7 @@ func (r *RepositoryImpl[T]) AvgWithCondition(ctx context.Context, column string,
 }
 
 // MaxWithCondition 带条件的最大值（推荐使用）
-func (r *RepositoryImpl[T]) MaxWithCondition(ctx context.Context, column string, where interface{}, opts ...Option) (any, error) {
+func (r *RepositoryImpl[T]) MaxWithCondition(ctx context.Context, column string, where any, opts ...Option) (any, error) {
 	if err := validateColumn(column); err != nil {
 		return nil, err
 	}
@@ -215,7 +215,7 @@ func (r *RepositoryImpl[T]) MaxWithCondition(ctx context.Context, column string,
 }
 
 // MinWithCondition 带条件的最小值（推荐使用）
-func (r *RepositoryImpl[T]) MinWithCondition(ctx context.Context, column string, where interface{}, opts ...Option) (any, error) {
+func (r *RepositoryImpl[T]) MinWithCondition(ctx context.Context, column string, where any, opts ...Option) (any, error) {
 	if err := validateColumn(column); err != nil {
 		return nil, err
 	}

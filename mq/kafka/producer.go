@@ -104,19 +104,33 @@ func (p *ProducerAdapter) handleAsyncErrors() {
 			if !ok {
 				return
 			}
-			p.logger.Error("async producer error",
-				zap.String("topic", err.Msg.Topic),
-				zap.Error(err.Err),
-			)
+			if cb, ok := err.Msg.Metadata.(mq.SendCallback); ok && cb != nil {
+				cb(nil, err.Err)
+			} else {
+				p.logger.Error("async producer error",
+					zap.String("topic", err.Msg.Topic),
+					zap.Error(err.Err),
+				)
+			}
 		case msg, ok := <-p.asyncProducer.Successes():
 			if !ok {
 				return
 			}
-			p.logger.Debug("async message sent",
-				zap.String("topic", msg.Topic),
-				zap.Int32("partition", msg.Partition),
-				zap.Int64("offset", msg.Offset),
-			)
+			if cb, ok := msg.Metadata.(mq.SendCallback); ok && cb != nil {
+				cb(&mq.SendResult{
+					MsgID:     fmt.Sprintf("%s-%d-%d", msg.Topic, msg.Partition, msg.Offset),
+					Topic:     msg.Topic,
+					Partition: msg.Partition,
+					Offset:    msg.Offset,
+					Status:    mq.SendStatusOK,
+				}, nil)
+			} else {
+				p.logger.Debug("async message sent",
+					zap.String("topic", msg.Topic),
+					zap.Int32("partition", msg.Partition),
+					zap.Int64("offset", msg.Offset),
+				)
+			}
 		case <-p.ctx.Done():
 			return
 		}
@@ -168,9 +182,10 @@ func (p *ProducerAdapter) SendAsync(ctx context.Context, msg *mq.Message, callba
 	p.mu.RUnlock()
 
 	kafkaMsg := convertToKafkaMessage(msg)
+	kafkaMsg.Metadata = callback
 
 	// 注意：Sarama 的异步 Producer 不支持单消息回调
-	// 回调通过 Successes() 和 Errors() channel 处理
+	// 回调通过 Successes() 和 Errors() channel 处理（使用 ProducerMessage.Metadata 关联）
 	select {
 	case p.asyncProducer.Input() <- kafkaMsg:
 		return nil

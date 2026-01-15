@@ -15,17 +15,29 @@ import (
  * ======================================================================== */
 
 // Transaction 在事务中执行操作
-// 如果 fn 返回错误，事务将回滚；否则提交
+// Deprecated: 请使用 Execute 方法以支持隐式事务传播
 func (r *RepositoryImpl[T]) Transaction(ctx context.Context, fn func(tx *gorm.DB) error) error {
 	db := r.withContext(ctx)
 
-	if err := db.Transaction(func(tx *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
 		return fn(tx)
-	}); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "transaction failed", err)
-	}
+	})
+}
 
-	return nil
+// Execute 在事务中执行操作（支持隐式事务传播）
+// 符合 GO_RULES.md 规范：tx.Manager.Execute(ctx, fn)
+func (r *RepositoryImpl[T]) Execute(ctx context.Context, fn func(ctx context.Context) error) error {
+	// 使用原始 DB 开启事务（避免嵌套事务时的 context 混乱，虽然 GORM 支持嵌套，但这里从源头开启更清晰）
+	// 注意：如果 ctx 已经是事务 context，GORM 的 Transaction 方法会自动处理为 SavePoint
+	db := r.withContext(ctx)
+
+	// GORM 的 Transaction 方法会自动提交或回滚
+	// 我们直接返回原始错误，由 Service 层决定如何处理
+	return db.Transaction(func(tx *gorm.DB) error {
+		// 将 tx 注入 context
+		ctxWithTx := context.WithValue(ctx, ctxTxKey{}, tx)
+		return fn(ctxWithTx)
+	})
 }
 
 // WithTx 创建事务版本的仓储

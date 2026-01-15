@@ -18,7 +18,7 @@ import (
 
 // Loader 定义配置加载接口
 type Loader interface {
-	Load(config interface{}) error
+	Load(config any) error
 }
 
 type viperLoader struct {
@@ -77,7 +77,7 @@ func NewLoaderWithEnvPrefix(configPath, configName, configType, envPrefix string
 	}
 }
 
-func (l *viperLoader) Load(config interface{}) error {
+func (l *viperLoader) Load(config any) error {
 	// 先让 viper 帮我们定位配置文件（支持 AddConfigPath + SetConfigName 的搜索逻辑）
 	finder := viper.New()
 	finder.AddConfigPath(l.configPath)

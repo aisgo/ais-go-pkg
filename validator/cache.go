@@ -50,8 +50,18 @@ func (tc *typeCache) set(t reflect.Type, info []fieldInfo) {
 
 // getFieldsInfo 获取类型的字段信息（带缓存）
 func (tc *typeCache) getFieldsInfo(t reflect.Type) []fieldInfo {
-	// 检查缓存
+	// 检查缓存 (Read Lock)
 	if info, exists := tc.get(t); exists {
+		return info
+	}
+
+	// 缓存未命中，获取写锁 (Write Lock)
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+
+	// 双重检查 (Double Checked Locking)
+	// 防止多个 goroutine 同时发现缓存缺失并排队进入此处，导致重复解析
+	if info, exists := tc.cache[t]; exists {
 		return info
 	}
 
@@ -59,6 +69,10 @@ func (tc *typeCache) getFieldsInfo(t reflect.Type) []fieldInfo {
 	var fields []fieldInfo
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
+		if field.PkgPath != "" {
+			// 跳过未导出字段：反射读取 Interface() 会 panic
+			continue
+		}
 		fieldType := field.Type
 		isPtr := fieldType.Kind() == reflect.Ptr
 
@@ -78,6 +92,6 @@ func (tc *typeCache) getFieldsInfo(t reflect.Type) []fieldInfo {
 	}
 
 	// 存入缓存
-	tc.set(t, fields)
+	tc.cache[t] = fields
 	return fields
 }

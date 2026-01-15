@@ -56,6 +56,15 @@ func (e *BizError) Error() string {
 	return fmt.Sprintf("[%d] %s", e.Code, e.Message)
 }
 
+// Is 支持 errors.Is：按业务错误码匹配
+func (e *BizError) Is(target error) bool {
+	t, ok := target.(*BizError)
+	if !ok {
+		return false
+	}
+	return e.Code == t.Code
+}
+
 // Unwrap 支持 errors.Is 和 errors.As
 func (e *BizError) Unwrap() error {
 	return e.Cause
@@ -83,7 +92,7 @@ func Wrap(code ErrorCode, message string, cause error) *BizError {
 }
 
 // Wrapf 格式化包装错误
-func Wrapf(code ErrorCode, cause error, format string, args ...interface{}) *BizError {
+func Wrapf(code ErrorCode, cause error, format string, args ...any) *BizError {
 	return &BizError{
 		Code:    code,
 		Message: fmt.Sprintf(format, args...),
@@ -118,7 +127,7 @@ func Is(err, target error) bool {
 }
 
 // As 将错误转换为指定类型
-func As(err error, target interface{}) bool {
+func As(err error, target any) bool {
 	return errors.As(err, target)
 }
 
@@ -243,9 +252,9 @@ var httpStatusCode = map[ErrorCode]int{
 
 // HTTPResponse HTTP 响应结构
 type HTTPResponse struct {
-	Code int         `json:"code"`
-	Msg  string      `json:"msg"`
-	Data interface{} `json:"data,omitempty"`
+	Code int    `json:"code"`
+	Msg  string `json:"msg"`
+	Data any    `json:"data,omitempty"`
 }
 
 // ToHTTPResponse 将业务错误转换为 HTTP 响应
@@ -261,7 +270,7 @@ func ToHTTPResponse(err error) (int, fiber.Map) {
 			statusCode = 500
 		}
 		return statusCode, fiber.Map{
-			"code": bizErr.Code,
+			"code": int(bizErr.Code),
 			"msg":  bizErr.Message,
 		}
 	}

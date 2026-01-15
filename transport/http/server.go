@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"fmt"
+	"os"
 	"runtime"
 	"time"
 
@@ -22,13 +23,58 @@ import (
  * 技术: Fiber v3
  * ======================================================================== */
 
+// Config HTTP 服务器配置
 type Config struct {
 	Port         int           `yaml:"port"`
 	AppName      string        `yaml:"app_name"`
 	ReadTimeout  time.Duration `yaml:"read_timeout"`
 	WriteTimeout time.Duration `yaml:"write_timeout"`
 	IdleTimeout  time.Duration `yaml:"idle_timeout"`
+
+	// Listen 嵌套 ListenConfig 的可序列化配置项
+	Listen ListenOptions `yaml:"listen"`
 }
+
+// ListenOptions 包含 Fiber ListenConfig 中可以通过 YAML 配置的字段
+// 对于更高级的配置（如 TLSConfigFunc、BeforeServeFunc 等函数类型），
+// 请使用 ServerParams 中的 ListenConfigCustomizer
+type ListenOptions struct {
+	// 是否启用 Prefork 模式（多进程），默认 false
+	EnablePrefork bool `yaml:"enable_prefork"`
+
+	// 是否禁用启动消息，默认 false
+	DisableStartupMessage bool `yaml:"disable_startup_message"`
+
+	// 是否打印所有路由，默认 false
+	EnablePrintRoutes bool `yaml:"enable_print_routes"`
+
+	// 监听网络类型（tcp, tcp4, tcp6, unix），默认 tcp4
+	// 注意：使用 Prefork 时只能选择 tcp4 或 tcp6
+	ListenerNetwork string `yaml:"listener_network"`
+
+	// TLS 证书文件路径
+	CertFile string `yaml:"cert_file"`
+
+	// TLS 证书私钥文件路径
+	CertKeyFile string `yaml:"cert_key_file"`
+
+	// mTLS 客户端证书文件路径
+	CertClientFile string `yaml:"cert_client_file"`
+
+	// 优雅关闭超时时间，默认 10s
+	ShutdownTimeout time.Duration `yaml:"shutdown_timeout"`
+
+	// Unix Socket 文件权限模式，默认 0770
+	UnixSocketFileMode uint32 `yaml:"unix_socket_file_mode"`
+
+	// TLS 最低版本，默认 TLS 1.2
+	// 可选值: 771 (TLS 1.2), 772 (TLS 1.3)
+	TLSMinVersion uint16 `yaml:"tls_min_version"`
+}
+
+// ListenConfigCustomizer 自定义 ListenConfig 的函数类型
+// 用于配置那些无法通过 YAML 序列化的高级选项（如回调函数、context 等）
+type ListenConfigCustomizer func(*fiber.ListenConfig)
 
 type ServerParams struct {
 	fx.In
@@ -36,6 +82,15 @@ type ServerParams struct {
 	Config Config
 	Logger *logger.Logger
 	DB     *gorm.DB `optional:"true"` // 用于健康检查，可选
+
+	// ListenConfigCustomizer 可选的 ListenConfig 自定义函数
+	// 使用此函数可以设置更高级的配置，如：
+	//   - GracefulContext: 优雅关闭的 context
+	//   - TLSConfigFunc: 自定义 TLS 配置函数
+	//   - ListenerAddrFunc: 监听地址回调
+	//   - BeforeServeFunc: 服务启动前的回调
+	//   - AutoCertManager: ACME 自动证书管理器
+	ListenConfigCustomizer ListenConfigCustomizer `optional:"true"`
 }
 
 // NewHTTPServer 创建 HTTP 服务器并注册生命周期
@@ -79,7 +134,16 @@ func NewHTTPServer(p ServerParams) *fiber.App {
 			go func() {
 				addr := fmt.Sprintf(":%d", p.Config.Port)
 				p.Logger.Info("Starting HTTP Server", zap.String("addr", addr))
-				if err := app.Listen(addr); err != nil {
+
+				// 构建 ListenConfig
+				listenConfig := buildListenConfig(p.Config.Listen)
+
+				// 允许通过可选的 ListenConfigCustomizer 进行高级自定义
+				if p.ListenConfigCustomizer != nil {
+					p.ListenConfigCustomizer(&listenConfig)
+				}
+
+				if err := app.Listen(addr, listenConfig); err != nil {
 					p.Logger.Error("HTTP Server failed to start", zap.Error(err))
 					errChan <- err
 				}
@@ -105,6 +169,42 @@ func NewHTTPServer(p ServerParams) *fiber.App {
 	})
 
 	return app
+}
+
+// buildListenConfig 根据 ListenOptions 构建 Fiber ListenConfig，并应用默认值
+func buildListenConfig(opts ListenOptions) fiber.ListenConfig {
+	config := fiber.ListenConfig{
+		EnablePrefork:         opts.EnablePrefork,
+		DisableStartupMessage: opts.DisableStartupMessage,
+		EnablePrintRoutes:     opts.EnablePrintRoutes,
+		CertFile:              opts.CertFile,
+		CertKeyFile:           opts.CertKeyFile,
+		CertClientFile:        opts.CertClientFile,
+	}
+
+	// 应用默认值
+	if opts.ListenerNetwork != "" {
+		config.ListenerNetwork = opts.ListenerNetwork
+	} else {
+		config.ListenerNetwork = "tcp4" // 默认 tcp4
+	}
+
+	if opts.ShutdownTimeout > 0 {
+		config.ShutdownTimeout = opts.ShutdownTimeout
+	}
+	// 注意：Fiber 默认的 ShutdownTimeout 是 10s，这里不设置则使用 Fiber 的默认值
+
+	if opts.UnixSocketFileMode > 0 {
+		config.UnixSocketFileMode = os.FileMode(opts.UnixSocketFileMode)
+	}
+	// 注意：Fiber 默认的 UnixSocketFileMode 是 0770
+
+	if opts.TLSMinVersion > 0 {
+		config.TLSMinVersion = opts.TLSMinVersion
+	}
+	// 注意：Fiber 默认的 TLSMinVersion 是 tls.VersionTLS12
+
+	return config
 }
 
 /* ========================================================================

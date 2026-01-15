@@ -3,8 +3,6 @@ package repository
 import (
 	"context"
 
-	"github.com/aisgo/ais-go-pkg/errors"
-
 	"gorm.io/gorm"
 )
 
@@ -61,10 +59,7 @@ func (r *RepositoryImpl[T]) FindByID(ctx context.Context, id string, opts ...Opt
 
 	query := r.buildQuery(ctx, opt)
 	if err := query.Where("id = ?", id).First(model).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return nil, errors.New(errors.ErrCodeNotFound, "record not found")
-		}
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to find record", err)
+		return nil, err
 	}
 
 	return model, nil
@@ -81,7 +76,7 @@ func (r *RepositoryImpl[T]) FindByIDs(ctx context.Context, ids []string, opts ..
 
 	query := r.buildQuery(ctx, opt)
 	if err := query.Where("id IN ?", ids).Find(&models).Error; err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to find records", err)
+		return nil, err
 	}
 
 	return models, nil
@@ -107,10 +102,7 @@ func (r *RepositoryImpl[T]) FindOneWithOpts(ctx context.Context, query string, o
 	db := r.buildQuery(ctx, opt)
 
 	if err := db.Where(query, args...).First(model).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return nil, errors.New(errors.ErrCodeNotFound, "record not found")
-		}
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to find record", err)
+		return nil, err
 	}
 
 	return model, nil
@@ -136,7 +128,7 @@ func (r *RepositoryImpl[T]) FindByQueryWithOpts(ctx context.Context, query strin
 	db := r.buildQuery(ctx, opt)
 
 	if err := db.Where(query, args...).Find(&models).Error; err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to find records", err)
+		return nil, err
 	}
 
 	return models, nil
@@ -152,7 +144,7 @@ func (r *RepositoryImpl[T]) Count(ctx context.Context, query string, args ...any
 	db := r.withContext(ctx)
 
 	if err := db.Model(r.newModelPtr()).Where(query, args...).Count(&count).Error; err != nil {
-		return 0, errors.Wrap(errors.ErrCodeInternal, "failed to count records", err)
+		return 0, err
 	}
 
 	return count, nil
