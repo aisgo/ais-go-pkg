@@ -543,6 +543,20 @@ page := repo.Paginate(ctx, repository.PageRequest{
 }, repository.WithCondition("age > ?", 18))
 ```
 
+#### 多租户 (默认强制)
+
+Repository 默认强制租户隔离，请在调用前将租户信息注入 context。
+
+```go
+ctx := repository.WithTenantContext(ctx, repository.TenantContext{
+    TenantID: tenantID,
+    DeptID:   deptID,
+    IsAdmin:  false,
+})
+
+err := repo.Create(ctx, user)
+```
+
 ### ✅ Validator - 数据验证
 
 基于 validator/v10 的验证器封装。

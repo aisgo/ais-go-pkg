@@ -123,3 +123,21 @@ func TestUpdateByIDRespectsTenant(t *testing.T) {
         t.Fatalf("expected not found for cross-tenant update")
     }
 }
+
+func TestUpdateByIDCannotMutateTenant(t *testing.T) {
+    db := openTenantTestDB(t)
+    repo := NewRepository[tenantTestModel](db)
+
+    tenant := ulidv2.Make()
+    ctx := WithTenantContext(context.Background(), TenantContext{TenantID: tenant})
+
+    m := &tenantTestModel{ID: ulidv2.Make().String(), Name: "before"}
+    if err := repo.Create(ctx, m); err != nil {
+        t.Fatalf("create: %v", err)
+    }
+
+    otherTenant := ulidv2.Make()
+    if err := repo.UpdateByID(ctx, m.ID, map[string]any{"tenant_id": otherTenant}, "tenant_id"); err == nil {
+        t.Fatalf("expected update to reject tenant_id change")
+    }
+}

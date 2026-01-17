@@ -248,6 +248,9 @@ func (r *RepositoryImpl[T]) filterUpdates(updates map[string]any, allowedFields 
 
 		// 优先匹配数据库列名 (DB Name)
 		if field, ok := schema.FieldsByDBName[k]; ok {
+			if field.DBName == tenantColumn || field.DBName == deptColumn {
+				continue
+			}
 			if !field.PrimaryKey && field.Updatable {
 				filtered[k] = v
 			}
@@ -255,6 +258,9 @@ func (r *RepositoryImpl[T]) filterUpdates(updates map[string]any, allowedFields 
 		}
 		// 尝试匹配结构体字段名 (Struct Field Name)
 		if field, ok := schema.FieldsByName[k]; ok {
+			if field.DBName == tenantColumn || field.DBName == deptColumn {
+				continue
+			}
 			if !field.PrimaryKey && field.Updatable {
 				filtered[field.DBName] = v
 			}
