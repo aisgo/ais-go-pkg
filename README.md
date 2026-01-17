@@ -557,6 +557,17 @@ ctx := repository.WithTenantContext(ctx, repository.TenantContext{
 err := repo.Create(ctx, user)
 ```
 
+如需对非多租户表关闭强制隔离，实现接口即可：
+
+```go
+type NonTenantModel struct {
+    ID   string `gorm:"column:id;type:char(26);primaryKey"`
+    Name string `gorm:"column:name"`
+}
+
+func (NonTenantModel) TenantIgnored() bool { return true }
+```
+
 ### ✅ Validator - 数据验证
 
 基于 validator/v10 的验证器封装。

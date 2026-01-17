@@ -16,6 +16,11 @@ type TenantContext struct {
     UserID        ulidv2.ULID
 }
 
+// TenantIgnorable marks models that should bypass tenant enforcement.
+type TenantIgnorable interface {
+	TenantIgnored() bool
+}
+
 type tenantCtxKey struct{}
 
 // WithTenantContext injects TenantContext into context.Context.

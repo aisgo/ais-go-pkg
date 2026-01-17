@@ -15,6 +15,10 @@ const (
 )
 
 func (r *RepositoryImpl[T]) applyTenantScope(ctx context.Context, db *gorm.DB) *gorm.DB {
+	if r.isTenantIgnored(r.newModelPtr()) {
+		return db
+	}
+
     tc, ok := TenantFromContext(ctx)
     if !ok {
         db.AddError(errors.ErrUnauthenticated)
@@ -49,6 +53,10 @@ func (r *RepositoryImpl[T]) tenantFields() (*schema.Field, *schema.Field, error)
 }
 
 func (r *RepositoryImpl[T]) setTenantFields(ctx context.Context, model any) error {
+	if r.isTenantIgnored(model) {
+		return nil
+	}
+
     tc, ok := TenantFromContext(ctx)
     if !ok {
         return errors.ErrUnauthenticated
@@ -71,4 +79,23 @@ func (r *RepositoryImpl[T]) setTenantFields(ctx context.Context, model any) erro
     }
 
     return nil
+}
+
+func (r *RepositoryImpl[T]) isTenantIgnored(model any) bool {
+	if model == nil {
+		return false
+	}
+
+	if ignorable, ok := model.(TenantIgnorable); ok {
+		return ignorable.TenantIgnored()
+	}
+
+	rv := reflect.ValueOf(model)
+	if rv.Kind() == reflect.Ptr && !rv.IsNil() {
+		if ignorable, ok := rv.Elem().Interface().(TenantIgnorable); ok {
+			return ignorable.TenantIgnored()
+		}
+	}
+
+	return false
 }

@@ -16,6 +16,15 @@ type tenantTestModel struct {
     Name     string      `gorm:"column:name"`
 }
 
+type nonTenantModel struct {
+	ID   string `gorm:"column:id;type:char(26);primaryKey"`
+	Name string `gorm:"column:name"`
+}
+
+func (nonTenantModel) TenantIgnored() bool {
+	return true
+}
+
 func openTenantTestDB(t *testing.T) *gorm.DB {
     t.Helper()
     db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -25,7 +34,19 @@ func openTenantTestDB(t *testing.T) *gorm.DB {
     if err := db.AutoMigrate(&tenantTestModel{}); err != nil {
         t.Fatalf("migrate: %v", err)
     }
-    return db
+	return db
+}
+
+func openNonTenantTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&nonTenantModel{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	return db
 }
 
 func TestTenantFindByIDScope(t *testing.T) {
@@ -53,6 +74,20 @@ func TestTenantFindByIDScope(t *testing.T) {
     if _, err := repo.FindByID(ctxA, a.ID); err != nil {
         t.Fatalf("expected find by id: %v", err)
     }
+}
+
+func TestTenantIgnoredModelCreateAndQuery(t *testing.T) {
+	db := openNonTenantTestDB(t)
+	repo := NewRepository[nonTenantModel](db)
+
+	m := &nonTenantModel{ID: ulidv2.Make().String(), Name: "n1"}
+	if err := repo.Create(context.Background(), m); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	if _, err := repo.FindByID(context.Background(), m.ID); err != nil {
+		t.Fatalf("find: %v", err)
+	}
 }
 
 func TestTenantCreateAutoFill(t *testing.T) {
