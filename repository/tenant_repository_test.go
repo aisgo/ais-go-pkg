@@ -80,3 +80,46 @@ func TestTenantCreateMissingContext(t *testing.T) {
         t.Fatalf("expected error without tenant context")
     }
 }
+
+func TestUpdateIgnoresZeroValues(t *testing.T) {
+    db := openTenantTestDB(t)
+    repo := NewRepository[tenantTestModel](db)
+    tenant := ulidv2.Make()
+    ctx := WithTenantContext(context.Background(), TenantContext{TenantID: tenant})
+
+    m := &tenantTestModel{ID: ulidv2.Make().String(), Name: "before"}
+    if err := repo.Create(ctx, m); err != nil {
+        t.Fatalf("create: %v", err)
+    }
+
+    m.Name = ""
+    if err := repo.Update(ctx, m); err != nil {
+        t.Fatalf("update: %v", err)
+    }
+
+    got, err := repo.FindByID(ctx, m.ID)
+    if err != nil {
+        t.Fatalf("find: %v", err)
+    }
+    if got.Name != "before" {
+        t.Fatalf("expected name preserved, got: %s", got.Name)
+    }
+}
+
+func TestUpdateByIDRespectsTenant(t *testing.T) {
+    db := openTenantTestDB(t)
+    repo := NewRepository[tenantTestModel](db)
+
+    tenantA := ulidv2.Make()
+    tenantB := ulidv2.Make()
+
+    m := &tenantTestModel{ID: ulidv2.Make().String(), Name: "before"}
+    if err := repo.Create(WithTenantContext(context.Background(), TenantContext{TenantID: tenantA}), m); err != nil {
+        t.Fatalf("create: %v", err)
+    }
+
+    ctxB := WithTenantContext(context.Background(), TenantContext{TenantID: tenantB})
+    if err := repo.UpdateByID(ctxB, m.ID, map[string]any{"name": "after"}, "name"); err == nil {
+        t.Fatalf("expected not found for cross-tenant update")
+    }
+}

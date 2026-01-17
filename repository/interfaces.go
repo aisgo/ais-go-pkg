@@ -92,7 +92,7 @@ type CRUDRepository[T any] interface {
 	CreateBatch(ctx context.Context, models []*T, batchSize int) error
 
 	// Update 更新记录（根据主键）
-	// 注意: 使用 Save 语义，会更新所有字段（包括零值）
+	// 注意: 使用 Updates 语义，默认忽略零值字段
 	Update(ctx context.Context, model *T) error
 
 	// UpdateByID 根据 ID 更新指定字段

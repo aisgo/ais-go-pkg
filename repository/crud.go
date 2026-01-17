@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"reflect"
 	"sync"
 
 	"github.com/aisgo/ais-go-pkg/errors"
@@ -175,7 +176,12 @@ func (r *RepositoryImpl[T]) Update(ctx context.Context, model *T) error {
 		return errors.ErrInvalidArgument
 	}
 
-	result := r.withContext(ctx).Save(model)
+	if err := r.ensurePrimaryKeySet(ctx, model); err != nil {
+		return err
+	}
+
+	db := r.applyTenantScope(ctx, r.withContext(ctx))
+	result := db.Model(model).Updates(model)
 	if result.Error != nil {
 		return result.Error
 	}
@@ -204,7 +210,7 @@ func (r *RepositoryImpl[T]) UpdateByID(ctx context.Context, id string, updates m
 	}
 
 	model := r.newModelPtr()
-	result := r.withContext(ctx).Model(model).Where("id = ?", id).Updates(filteredUpdates)
+	result := r.applyTenantScope(ctx, r.withContext(ctx)).Model(model).Where("id = ?", id).Updates(filteredUpdates)
 	if result.Error != nil {
 		return result.Error
 	}
@@ -303,7 +309,7 @@ func (r *RepositoryImpl[T]) UpsertBatch(ctx context.Context, models []*T) error 
 // Delete 软删除记录（设置 deleted_at）
 func (r *RepositoryImpl[T]) Delete(ctx context.Context, id string) error {
 	model := r.newModelPtr()
-	result := r.withContext(ctx).Delete(model, "id = ?", id)
+	result := r.applyTenantScope(ctx, r.withContext(ctx)).Delete(model, "id = ?", id)
 	if result.Error != nil {
 		return result.Error
 	}
@@ -322,19 +328,37 @@ func (r *RepositoryImpl[T]) DeleteBatch(ctx context.Context, ids []string) error
 	}
 
 	model := r.newModelPtr()
-	return r.withContext(ctx).Delete(model, "id IN ?", ids).Error
+	return r.applyTenantScope(ctx, r.withContext(ctx)).Delete(model, "id IN ?", ids).Error
 }
 
 // HardDelete 硬删除记录（从数据库移除）
 func (r *RepositoryImpl[T]) HardDelete(ctx context.Context, id string) error {
 	model := r.newModelPtr()
-	result := r.withContext(ctx).Unscoped().Delete(model, "id = ?", id)
+	result := r.applyTenantScope(ctx, r.withContext(ctx)).Unscoped().Delete(model, "id = ?", id)
 	if result.Error != nil {
 		return result.Error
 	}
 
 	if result.RowsAffected == 0 {
 		return gorm.ErrRecordNotFound
+	}
+
+	return nil
+}
+
+func (r *RepositoryImpl[T]) ensurePrimaryKeySet(ctx context.Context, model any) error {
+	schema, err := r.getSchema()
+	if err != nil {
+		return err
+	}
+
+	if schema.PrioritizedPrimaryField == nil {
+		return errors.ErrInvalidArgument
+	}
+
+	_, zero := schema.PrioritizedPrimaryField.ValueOf(ctx, reflect.ValueOf(model))
+	if zero {
+		return errors.ErrInvalidArgument
 	}
 
 	return nil
