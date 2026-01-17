@@ -126,6 +126,10 @@ func (r *RepositoryImpl[T]) Create(ctx context.Context, model *T) error {
 		return errors.ErrInvalidArgument
 	}
 
+	if err := r.setTenantFields(ctx, model); err != nil {
+		return err
+	}
+
 	return r.withContext(ctx).Create(model).Error
 }
 
@@ -149,6 +153,12 @@ func (r *RepositoryImpl[T]) CreateBatch(ctx context.Context, models []*T, batchS
 
 	if len(validModels) == 0 {
 		return nil
+	}
+
+	for _, m := range validModels {
+		if err := r.setTenantFields(ctx, m); err != nil {
+			return err
+		}
 	}
 
 	return r.withContext(ctx).CreateInBatches(validModels, batchSize).Error
@@ -268,6 +278,12 @@ func (r *RepositoryImpl[T]) UpsertBatch(ctx context.Context, models []*T) error 
 
 	if len(validModels) == 0 {
 		return nil
+	}
+
+	for _, m := range validModels {
+		if err := r.setTenantFields(ctx, m); err != nil {
+			return err
+		}
 	}
 
 	// 使用 Upsert 实现高效批量更新

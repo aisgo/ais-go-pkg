@@ -54,3 +54,29 @@ func TestTenantFindByIDScope(t *testing.T) {
         t.Fatalf("expected find by id: %v", err)
     }
 }
+
+func TestTenantCreateAutoFill(t *testing.T) {
+    db := openTenantTestDB(t)
+    repo := NewRepository[tenantTestModel](db)
+
+    tenant := ulidv2.Make()
+    ctx := WithTenantContext(context.Background(), TenantContext{TenantID: tenant})
+
+    m := &tenantTestModel{ID: ulidv2.Make().String(), Name: "auto"}
+    if err := repo.Create(ctx, m); err != nil {
+        t.Fatalf("create: %v", err)
+    }
+    if m.TenantID != tenant {
+        t.Fatalf("tenant not set")
+    }
+}
+
+func TestTenantCreateMissingContext(t *testing.T) {
+    db := openTenantTestDB(t)
+    repo := NewRepository[tenantTestModel](db)
+
+    m := &tenantTestModel{ID: ulidv2.Make().String(), Name: "no-ctx"}
+    if err := repo.Create(context.Background(), m); err == nil {
+        t.Fatalf("expected error without tenant context")
+    }
+}

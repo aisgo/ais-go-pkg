@@ -2,9 +2,11 @@ package repository
 
 import (
     "context"
+    "reflect"
 
     "github.com/aisgo/ais-go-pkg/errors"
     "gorm.io/gorm"
+    "gorm.io/gorm/schema"
 )
 
 const (
@@ -19,26 +21,54 @@ func (r *RepositoryImpl[T]) applyTenantScope(ctx context.Context, db *gorm.DB) *
         return db
     }
 
-    if err := r.ensureTenantFields(); err != nil {
+    _, deptField, err := r.tenantFields()
+    if err != nil {
         db.AddError(err)
         return db
     }
 
     db = db.Where(tenantColumn+" = ?", tc.TenantID)
-    if !tc.IsAdmin && tc.DeptID != nil {
+    if !tc.IsAdmin && tc.DeptID != nil && deptField != nil {
         db = db.Where(deptColumn+" = ?", *tc.DeptID)
     }
 
     return db
 }
 
-func (r *RepositoryImpl[T]) ensureTenantFields() error {
+func (r *RepositoryImpl[T]) tenantFields() (*schema.Field, *schema.Field, error) {
     schema, err := r.getSchema()
+    if err != nil {
+        return nil, nil, err
+    }
+    if _, ok := schema.FieldsByDBName[tenantColumn]; !ok {
+        return nil, nil, errors.ErrInvalidArgument
+    }
+    tenantField := schema.FieldsByDBName[tenantColumn]
+    deptField := schema.FieldsByDBName[deptColumn]
+    return tenantField, deptField, nil
+}
+
+func (r *RepositoryImpl[T]) setTenantFields(ctx context.Context, model any) error {
+    tc, ok := TenantFromContext(ctx)
+    if !ok {
+        return errors.ErrUnauthenticated
+    }
+
+    tenantField, deptField, err := r.tenantFields()
     if err != nil {
         return err
     }
-    if _, ok := schema.FieldsByDBName[tenantColumn]; !ok {
-        return errors.ErrInvalidArgument
+
+    rv := reflect.ValueOf(model)
+    if err := tenantField.Set(ctx, rv, tc.TenantID); err != nil {
+        return err
     }
+
+    if tc.DeptID != nil && deptField != nil {
+        if err := deptField.Set(ctx, rv, tc.DeptID); err != nil {
+            return err
+        }
+    }
+
     return nil
 }
