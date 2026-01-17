@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 )
 
@@ -114,5 +115,7 @@ func (l *viperLoader) Load(config any) error {
 		}
 	}
 
-	return v.Unmarshal(config)
+	return v.Unmarshal(config, func(dc *mapstructure.DecoderConfig) {
+		dc.TagName = "yaml"
+	})
 }
