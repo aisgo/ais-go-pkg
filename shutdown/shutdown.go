@@ -214,6 +214,10 @@ func (m *Manager) groupByPriority(hooks []hookEntry) []hookGroup {
 func (m *Manager) executeHookGroup(ctx context.Context, hooks []hookEntry) []hookResult {
 	errChan := make(chan hookResult, len(hooks))
 	var wg sync.WaitGroup
+	hookTimeout := m.config.HookTimeout
+	if hookTimeout <= 0 {
+		hookTimeout = 30 * time.Second
+	}
 
 	for _, h := range hooks {
 		wg.Add(1)
@@ -221,7 +225,9 @@ func (m *Manager) executeHookGroup(ctx context.Context, hooks []hookEntry) []hoo
 			defer wg.Done()
 
 			start := time.Now()
-			err := entry.hook(ctx)
+			hookCtx, cancel := context.WithTimeout(ctx, hookTimeout)
+			err := entry.hook(hookCtx)
+			cancel()
 			duration := time.Since(start)
 
 			errChan <- hookResult{

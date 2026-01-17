@@ -568,6 +568,11 @@ type NonTenantModel struct {
 func (NonTenantModel) TenantIgnored() bool { return true }
 ```
 
+#### 聚合返回值说明
+
+`Max/Min/MaxWithCondition/MinWithCondition` 的返回值类型由数据库驱动决定（如 `int64/float64/string/[]byte/time.Time` 等），
+无记录时返回 `nil`。调用方应按实际类型进行断言或转换。
+
 ### ✅ Validator - 数据验证
 
 基于 validator/v10 的验证器封装。

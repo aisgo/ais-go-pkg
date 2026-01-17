@@ -13,11 +13,15 @@ type Config struct {
 	// Timeout 关停超时时间
 	// 超时后将强制退出，即使有钩子未执行完成
 	Timeout time.Duration `yaml:"timeout"`
+	// HookTimeout 单个钩子的超时时间
+	// 超时后仅该钩子中止，其他钩子继续
+	HookTimeout time.Duration `yaml:"hook_timeout"`
 }
 
 // DefaultConfig 返回默认配置
 func DefaultConfig() *Config {
 	return &Config{
-		Timeout: 30 * time.Second,
+		Timeout:     30 * time.Second,
+		HookTimeout: 30 * time.Second,
 	}
 }

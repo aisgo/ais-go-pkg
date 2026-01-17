@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 /* ========================================================================
@@ -56,15 +57,13 @@ func NewLogger(cfg Config) *Logger {
 	// 配置输出
 	writer := zapcore.AddSync(os.Stdout)
 	if cfg.Output != "" && cfg.Output != "stdout" {
-		// 如果指定了文件输出，尝试打开文件
-		file, err := os.OpenFile(cfg.Output, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			fmt.Fprintf(os.Stderr,
-				"[WARN] Failed to open log file %q, using stdout: %v\n",
-				cfg.Output, err)
-		} else {
-			writer = zapcore.AddSync(file)
-		}
+		writer = zapcore.AddSync(&lumberjack.Logger{
+			Filename:   cfg.Output,
+			MaxSize:    100, // MB
+			MaxBackups: 3,
+			MaxAge:     28, // days
+			Compress:   true,
+		})
 	}
 
 	core := zapcore.NewCore(

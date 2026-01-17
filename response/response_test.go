@@ -40,3 +40,55 @@ func TestError_BizError(t *testing.T) {
 		t.Fatalf("unexpected msg: got=%q want=%q", got.Msg, "bad request")
 	}
 }
+
+func TestOkWithData(t *testing.T) {
+	t.Parallel()
+
+	app := fiber.New()
+	app.Get("/ok", func(c fiber.Ctx) error {
+		return OkWithData(c, fiber.Map{"id": 1})
+	})
+
+	req := httptest.NewRequest("GET", "/ok", nil)
+	resp, err := app.Test(req, fiber.TestConfig{Timeout: 2 * time.Second})
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("unexpected status: got=%d want=%d", resp.StatusCode, fiber.StatusOK)
+	}
+
+	var got Result
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	data, ok := got.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected data type: %T", got.Data)
+	}
+	if data["id"] != float64(1) {
+		t.Fatalf("unexpected data: %v", data)
+	}
+}
+
+func TestErrorWithCode_BizError(t *testing.T) {
+	t.Parallel()
+
+	app := fiber.New()
+	app.Get("/err", func(c fiber.Ctx) error {
+		return ErrorWithCode(c, fiber.StatusTeapot, aiserrors.New(aiserrors.ErrCodeInvalidArgument, "bad request"))
+	})
+
+	req := httptest.NewRequest("GET", "/err", nil)
+	resp, err := app.Test(req, fiber.TestConfig{Timeout: 2 * time.Second})
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != fiber.StatusTeapot {
+		t.Fatalf("unexpected status: got=%d want=%d", resp.StatusCode, fiber.StatusTeapot)
+	}
+}

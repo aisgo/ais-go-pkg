@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"regexp"
 	"strings"
 
@@ -36,7 +37,7 @@ func (r *RepositoryImpl[T]) Sum(ctx context.Context, column string, query string
 	}
 
 	var result float64
-	db := r.withContext(ctx)
+	db := r.applyTenantScope(ctx, r.withContext(ctx))
 
 	if query != "" {
 		db = db.Where(query, args...)
@@ -58,7 +59,7 @@ func (r *RepositoryImpl[T]) Avg(ctx context.Context, column string, query string
 	}
 
 	var result float64
-	db := r.withContext(ctx)
+	db := r.applyTenantScope(ctx, r.withContext(ctx))
 
 	if query != "" {
 		db = db.Where(query, args...)
@@ -73,44 +74,62 @@ func (r *RepositoryImpl[T]) Avg(ctx context.Context, column string, query string
 }
 
 // Max 最大值
+// 返回值类型取决于数据库驱动的扫描结果（int64/float64/string/[]byte/time.Time 等）
+// 无记录时返回 nil
 func (r *RepositoryImpl[T]) Max(ctx context.Context, column string, query string, args ...any) (any, error) {
 	if err := validateColumn(column); err != nil {
 		return nil, err
 	}
 
 	var result any
-	db := r.withContext(ctx)
+	db := r.applyTenantScope(ctx, r.withContext(ctx))
 
 	if query != "" {
 		db = db.Where(query, args...)
 	}
 
-	sql := "MAX(" + column + ")"
-	if err := db.Model(r.newModelPtr()).Select(sql).Scan(&result).Error; err != nil {
+	sqlQuery := "MAX(" + column + ")"
+	row := db.Model(r.newModelPtr()).Select(sqlQuery).Row()
+	if err := row.Scan(&result); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to get max value", err)
 	}
 
+	if result == nil {
+		return nil, nil
+	}
 	return result, nil
 }
 
 // Min 最小值
+// 返回值类型取决于数据库驱动的扫描结果（int64/float64/string/[]byte/time.Time 等）
+// 无记录时返回 nil
 func (r *RepositoryImpl[T]) Min(ctx context.Context, column string, query string, args ...any) (any, error) {
 	if err := validateColumn(column); err != nil {
 		return nil, err
 	}
 
 	var result any
-	db := r.withContext(ctx)
+	db := r.applyTenantScope(ctx, r.withContext(ctx))
 
 	if query != "" {
 		db = db.Where(query, args...)
 	}
 
-	sql := "MIN(" + column + ")"
-	if err := db.Model(r.newModelPtr()).Select(sql).Scan(&result).Error; err != nil {
+	sqlQuery := "MIN(" + column + ")"
+	row := db.Model(r.newModelPtr()).Select(sqlQuery).Row()
+	if err := row.Scan(&result); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to get min value", err)
 	}
 
+	if result == nil {
+		return nil, nil
+	}
 	return result, nil
 }
 
@@ -127,7 +146,7 @@ func (r *RepositoryImpl[T]) CountByGroup(ctx context.Context, groupColumn, query
 	}
 
 	var results []Result
-	db := r.withContext(ctx)
+	db := r.applyTenantScope(ctx, r.withContext(ctx))
 
 	if query != "" {
 		db = db.Where(query, args...)

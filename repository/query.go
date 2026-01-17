@@ -142,7 +142,7 @@ func (r *RepositoryImpl[T]) FindByQueryWithOpts(ctx context.Context, query strin
 // Count 统计记录数
 func (r *RepositoryImpl[T]) Count(ctx context.Context, query string, args ...any) (int64, error) {
 	var count int64
-	db := r.withContext(ctx)
+	db := r.applyTenantScope(ctx, r.withContext(ctx))
 
 	if err := db.Model(r.newModelPtr()).Where(query, args...).Count(&count).Error; err != nil {
 		return 0, err

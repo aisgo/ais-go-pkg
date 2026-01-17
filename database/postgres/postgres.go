@@ -77,6 +77,7 @@ func NewDB(p Params) (*gorm.DB, error) {
 	}
 	u.RawQuery = q.Encode()
 	dsn := u.String()
+	log.Info("Connecting to PostgreSQL", zap.String("dsn", sanitizeDSN(dsn)))
 
 	// 使用自定义的 ZapGormLogger
 	gormLog := database.NewZapGormLogger(log.Logger)
@@ -133,4 +134,15 @@ func NewDB(p Params) (*gorm.DB, error) {
 	})
 
 	return db, nil
+}
+
+func sanitizeDSN(dsn string) string {
+	u, err := url.Parse(dsn)
+	if err != nil || u == nil {
+		return dsn
+	}
+	if u.User != nil {
+		u.User = url.UserPassword(u.User.Username(), "***")
+	}
+	return u.String()
 }

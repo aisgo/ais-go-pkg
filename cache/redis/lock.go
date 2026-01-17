@@ -88,7 +88,7 @@ func (l *Lock) AcquireWithOption(ctx context.Context, opt LockOption) error {
 		if ok {
 			// 如果开启自动续期，启动续期 goroutine
 			if opt.AutoExtend {
-				l.startAutoExtend(opt.ExtendFactor)
+				l.startAutoExtend(ctx, opt.ExtendFactor)
 			}
 			return nil
 		}
@@ -105,15 +105,19 @@ func (l *Lock) AcquireWithOption(ctx context.Context, opt LockOption) error {
 }
 
 // startAutoExtend 启动自动续期（线程安全）
-func (l *Lock) startAutoExtend(extendFactor float64) {
+func (l *Lock) startAutoExtend(parentCtx context.Context, extendFactor float64) {
 	// 先停止旧的续期 goroutine（如果存在）
 	l.stopAutoExtend()
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	// 创建新的 context
-	l.extendCtx, l.extendCancel = context.WithCancel(context.Background())
+	// 使用父 context 的值，但不继承取消信号
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	ctx := context.WithoutCancel(parentCtx)
+	l.extendCtx, l.extendCancel = context.WithCancel(ctx)
 	// 重置 stopOnce，允许再次停止
 	l.stopOnce = sync.Once{}
 
