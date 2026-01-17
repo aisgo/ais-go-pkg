@@ -15,6 +15,7 @@ import (
 // buildQuery 构建查询
 func (r *RepositoryImpl[T]) buildQuery(ctx context.Context, opts *QueryOption) *gorm.DB {
 	db := r.withContext(ctx)
+	db = r.applyTenantScope(ctx, db)
 
 	if opts == nil {
 		return db
