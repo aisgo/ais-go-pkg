@@ -23,3 +23,9 @@ func getDBFromContext(ctx context.Context, originalDB *gorm.DB) *gorm.DB {
 	}
 	return originalDB.WithContext(ctx)
 }
+
+// DBFromContext returns the transaction-bound DB if present in context.
+// It always binds the provided context to the returned DB instance.
+func DBFromContext(ctx context.Context, originalDB *gorm.DB) *gorm.DB {
+	return getDBFromContext(ctx, originalDB)
+}
