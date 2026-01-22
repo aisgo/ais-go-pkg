@@ -19,9 +19,13 @@ import (
 
 // Config Logger 配置
 type Config struct {
-	Level  string `yaml:"level"`  // debug, info, warn, error
-	Format string `yaml:"format"` // json, console
-	Output string `yaml:"output"` // stdout, file
+	Level      string `yaml:"level"`  // debug, info, warn, error
+	Format     string `yaml:"format"` // json, console
+	Output     string `yaml:"output"` // stdout, file
+	MaxSize    int    `yaml:"max_size"`
+	MaxBackups int    `yaml:"max_backups"`
+	MaxAge     int    `yaml:"max_age"`
+	Compress   *bool  `yaml:"compress"`
 }
 
 // Logger 封装 Zap Logger
@@ -57,12 +61,29 @@ func NewLogger(cfg Config) *Logger {
 	// 配置输出
 	writer := zapcore.AddSync(os.Stdout)
 	if cfg.Output != "" && cfg.Output != "stdout" {
+		maxSize := cfg.MaxSize
+		if maxSize <= 0 {
+			maxSize = 100
+		}
+		maxBackups := cfg.MaxBackups
+		if maxBackups <= 0 {
+			maxBackups = 3
+		}
+		maxAge := cfg.MaxAge
+		if maxAge <= 0 {
+			maxAge = 28
+		}
+		compress := true
+		if cfg.Compress != nil {
+			compress = *cfg.Compress
+		}
+
 		writer = zapcore.AddSync(&lumberjack.Logger{
 			Filename:   cfg.Output,
-			MaxSize:    100, // MB
-			MaxBackups: 3,
-			MaxAge:     28, // days
-			Compress:   true,
+			MaxSize:    maxSize, // MB
+			MaxBackups: maxBackups,
+			MaxAge:     maxAge, // days
+			Compress:   compress,
 		})
 	}
 
@@ -89,6 +110,15 @@ func ValidateConfig(cfg Config) error {
 	// 验证格式
 	if cfg.Format != "" && cfg.Format != "json" && cfg.Format != "console" {
 		return fmt.Errorf("invalid log format %q, must be 'json' or 'console'", cfg.Format)
+	}
+	if cfg.MaxSize < 0 {
+		return fmt.Errorf("invalid max_size %d, must be >= 0", cfg.MaxSize)
+	}
+	if cfg.MaxBackups < 0 {
+		return fmt.Errorf("invalid max_backups %d, must be >= 0", cfg.MaxBackups)
+	}
+	if cfg.MaxAge < 0 {
+		return fmt.Errorf("invalid max_age %d, must be >= 0", cfg.MaxAge)
 	}
 
 	return nil

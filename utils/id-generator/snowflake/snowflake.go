@@ -1,6 +1,7 @@
 package snowflake
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"sync"
@@ -93,7 +94,10 @@ func (g *Generator) GenerateString() string {
 // initNode 初始化全局雪花节点（仅执行一次）
 // 节点 ID 从环境变量 SNOWFLAKE_NODE_ID 读取，默认为 0
 func initNode() error {
-	nodeID := getEnvNodeID()
+	nodeID, err := getEnvNodeID()
+	if err != nil {
+		return err
+	}
 
 	node, err := snowflake.NewNode(nodeID)
 	if err != nil {
@@ -139,22 +143,26 @@ func Parse(id int64) (timestamp int64, nodeID int64) {
 // ========================================================================
 
 // getEnvNodeID 从环境变量获取节点 ID
-func getEnvNodeID() int64 {
+func getEnvNodeID() (int64, error) {
 	val := os.Getenv(EnvNodeID)
 	if val == "" {
-		return DefaultNodeID
+		return DefaultNodeID, nil
 	}
 
 	id, err := strconv.ParseInt(val, 10, 64)
 	if err != nil {
-		return DefaultNodeID
+		return 0, fmt.Errorf("%s=%q: invalid integer", EnvNodeID, val)
 	}
 
 	if id < 0 || id > MaxNodeID {
-		return DefaultNodeID
+		return 0, &ConfigError{
+			Field:   EnvNodeID,
+			Value:   id,
+			Message: "nodeID must be between 0 and 1023",
+		}
 	}
 
-	return id
+	return id, nil
 }
 
 // ConfigError 配置错误

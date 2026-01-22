@@ -12,7 +12,10 @@ import (
  * ======================================================================== */
 
 // Module 缓存模块
-// 提供: *redis.Client
+// 提供: redis.Clienter, *redis.Client
 var Module = fx.Module("cache",
-	fx.Provide(redis.NewClient),
+	fx.Provide(
+		redis.NewClient,
+		func(c *redis.Client) redis.Clienter { return c },
+	),
 )

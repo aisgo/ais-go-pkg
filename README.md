@@ -27,7 +27,7 @@
 | **mq** | 消息队列抽象层 | Kafka, RocketMQ |
 | **transport** | HTTP/gRPC 服务器 | Fiber v3, gRPC |
 | **metrics** | Prometheus 监控 | prometheus/client_golang |
-| **middleware** | HTTP 中间件 | API Key 认证等 |
+| **middleware** | HTTP 中间件 | API Key 认证、Auth Header 透传、错误处理、限流等 |
 | **errors** | 统一错误处理 | gRPC/HTTP 错误转换 |
 | **repository** | 数据仓储模式 | CRUD, 分页, 聚合 |
 | **response** | 统一响应格式 | HTTP 响应封装 |
@@ -196,8 +196,15 @@ import "github.com/aisgo/ais-go-pkg/logger"
 log := logger.NewLogger(logger.Config{
     Level:      "info",        // debug, info, warn, error
     Format:     "json",        // json | console
-    OutputPath: "app.log",     // 可选，默认 stdout
+    Output:     "app.log",     // 可选，默认 stdout
+    MaxSize:    100,           // MB
+    MaxBackups: 3,
+    MaxAge:     28,            // days
 })
+
+// Compress 为 *bool，nil 表示默认 true；需要关闭时：
+// b := false
+// cfg.Compress = &b
 
 log.Info("user login", 
     zap.String("user_id", "123"),
@@ -344,7 +351,7 @@ app := fx.New(
     ),
     logger.Module,
     cache.Module,
-    fx.Invoke(func(client *redis.Client) {
+    fx.Invoke(func(client redis.Clienter) {
         ctx := context.Background()
         _ = client.Set(ctx, "key", "value", time.Hour)
         
@@ -358,9 +365,12 @@ app := fx.New(
 )
 ```
 
+> ✅ 接口优先：通过 Fx 模块注入时推荐使用 `redis.Clienter` 接口，便于 mock/替换实现；同时仍保留 `*redis.Client` 注入。
+
 ### 📨 MQ - 消息队列抽象层
 
 统一接口，支持 Kafka 和 RocketMQ 无缝切换。
+Kafka Consumer 默认关闭 auto-commit，成功处理后会显式提交 offset；如需自动提交，请设置 `Consumer.AutoCommit=true`。
 
 #### 直接使用
 
@@ -482,6 +492,8 @@ app := fx.New(
 )
 _ = app
 ```
+
+> ✅ gRPC ClientFactory 支持 TLS：配置 `aisgrpc.Config.TLS`（例如 `enable/ca_file/cert_file/key_file/server_name`）即可启用安全连接。
 
 ### 📊 Metrics - Prometheus 监控
 

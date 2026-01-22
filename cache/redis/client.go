@@ -29,11 +29,33 @@ type Config struct {
 	MinIdleConns int    `yaml:"min_idle_conns"`
 }
 
+// Clienter Redis 客户端接口（便于 mock/替换实现）
+type Clienter interface {
+	Raw() *redis.Client
+
+	Get(ctx context.Context, key string) (string, error)
+	Set(ctx context.Context, key string, value any, expiration time.Duration) error
+	SetNX(ctx context.Context, key string, value any, expiration time.Duration) (bool, error)
+	Del(ctx context.Context, keys ...string) error
+	Exists(ctx context.Context, keys ...string) (int64, error)
+	Expire(ctx context.Context, key string, expiration time.Duration) error
+
+	HGet(ctx context.Context, key, field string) (string, error)
+	HSet(ctx context.Context, key string, values ...any) error
+	HGetAll(ctx context.Context, key string) (map[string]string, error)
+	HDel(ctx context.Context, key string, fields ...string) error
+
+	Ping(ctx context.Context) error
+	NewLock(key string, opts ...LockOption) *Lock
+}
+
 // Client Redis 客户端封装
 type Client struct {
 	rdb *redis.Client
 	log *logger.Logger
 }
+
+var _ Clienter = (*Client)(nil)
 
 type ClientParams struct {
 	fx.In

@@ -16,6 +16,7 @@ require (
 	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.17.2
 	github.com/spf13/viper v1.21.0
+	github.com/ulule/limiter/v3 v3.11.2
 	github.com/valyala/fasthttp v1.69.0
 	github.com/xdg-go/scram v1.2.0
 	go.uber.org/fx v1.24.0

@@ -45,22 +45,45 @@ func WithScopes(scopes ...func(*gorm.DB) *gorm.DB) Option {
 }
 
 // WithOrderBy 设置排序
+// 自动校验列名和排序方向，防止 SQL 注入
+// 允许格式: "column ASC", "table.column DESC", "col1 ASC, col2 DESC"
 func WithOrderBy(orderBy string) Option {
 	return func(o *QueryOption) {
+		// 安全校验：防止 SQL 注入
+		if err := ValidateOrderBy(orderBy); err != nil {
+			// 校验失败时忽略该选项，避免注入风险
+			// 注意：这里选择静默失败而不是 panic，保持向后兼容
+			// 生产环境应记录警告日志
+			return
+		}
 		o.OrderBy = orderBy
 	}
 }
 
 // WithSelect 设置选择字段
+// 自动校验列名，防止 SQL 注入
+// 允许格式: "id", "table.column", "COUNT(*) AS count"
 func WithSelect(selects ...string) Option {
 	return func(o *QueryOption) {
+		// 安全校验：防止 SQL 注入
+		if err := ValidateSelect(selects); err != nil {
+			// 校验失败时忽略该选项
+			return
+		}
 		o.Select = selects
 	}
 }
 
 // WithJoins 设置连接查询
+// 自动校验 JOIN 语法，防止 SQL 注入
+// 允许格式: "LEFT JOIN orders ON orders.user_id = users.id"
 func WithJoins(joins ...string) Option {
 	return func(o *QueryOption) {
+		// 安全校验：防止 SQL 注入
+		if err := ValidateJoins(joins); err != nil {
+			// 校验失败时忽略该选项
+			return
+		}
 		o.Joins = joins
 	}
 }

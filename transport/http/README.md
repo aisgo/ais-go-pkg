@@ -286,6 +286,7 @@ func registerRoutes(app *fiber.App) {
 | `read_timeout` | `time.Duration` | `30s` | 读取超时时间 |
 | `write_timeout` | `time.Duration` | `30s` | 写入超时时间 |
 | `idle_timeout` | `time.Duration` | `120s` | 空闲连接超时时间 |
+| `health_check_timeout` | `time.Duration` | `2s` | `/readyz` 数据库 Ping 超时 |
 
 ### ListenOptions 字段
 

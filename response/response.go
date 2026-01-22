@@ -2,10 +2,13 @@ package response
 
 import (
 	"net/http"
+	"sync"
 
 	"github.com/aisgo/ais-go-pkg/errors"
+	"github.com/aisgo/ais-go-pkg/logger"
 
 	"github.com/gofiber/fiber/v3"
+	"go.uber.org/zap"
 )
 
 /* ========================================================================
@@ -43,6 +46,44 @@ func normalizeHTTPStatusCode(code int) int {
 		return http.StatusInternalServerError
 	}
 	return code
+}
+
+func safeErrorMessage(code int) string {
+	httpCode := normalizeHTTPStatusCode(code)
+	if httpCode >= http.StatusInternalServerError {
+		return errors.ErrInternal.Message
+	}
+	if msg := http.StatusText(httpCode); msg != "" {
+		return msg
+	}
+	return errors.ErrInternal.Message
+}
+
+var (
+	errorLoggerMu sync.RWMutex
+	errorLogger   *logger.Logger
+)
+
+// SetErrorLogger 设置响应错误日志记录器（可用于注入应用 Logger）
+func SetErrorLogger(log *logger.Logger) *logger.Logger {
+	errorLoggerMu.Lock()
+	defer errorLoggerMu.Unlock()
+	prev := errorLogger
+	errorLogger = log
+	return prev
+}
+
+func logInternalError(err error, status int) {
+	if err == nil {
+		return
+	}
+	errorLoggerMu.RLock()
+	log := errorLogger
+	errorLoggerMu.RUnlock()
+	if log == nil {
+		return
+	}
+	log.Error("response error", zap.Error(err), zap.Int("status", normalizeHTTPStatusCode(status)))
 }
 
 // respJSONWithStatusCode 返回 JSON 响应
@@ -107,7 +148,8 @@ func Error(c fiber.Ctx, err error) error {
 	}
 
 	// 普通错误，返回 500
-	return respJSONWithStatusCode(c, http.StatusInternalServerError, err.Error())
+	logInternalError(err, http.StatusInternalServerError)
+	return respJSONWithStatusCode(c, http.StatusInternalServerError, safeErrorMessage(http.StatusInternalServerError))
 }
 
 // ErrorWithCode 返回错误响应（指定 HTTP 状态码）
@@ -134,7 +176,8 @@ func ErrorWithCode(c fiber.Ctx, code int, err error) error {
 		})
 	}
 
-	return respJSONWithStatusCode(c, code, err.Error())
+	logInternalError(err, code)
+	return respJSONWithStatusCode(c, code, safeErrorMessage(code))
 }
 
 // ErrorWithMsg 返回错误响应（自定义消息）

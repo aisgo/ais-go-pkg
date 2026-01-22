@@ -166,7 +166,7 @@ func DefaultKafkaConfig() *KafkaConfig {
 		Consumer: KafkaConsumerConfig{
 			GroupID:            "default_consumer_group",
 			InitialOffset:      "newest",
-			AutoCommit:         true,
+			AutoCommit:         false,
 			AutoCommitInterval: 1 * time.Second,
 			SessionTimeout:     10 * time.Second,
 			HeartbeatInterval:  3 * time.Second,

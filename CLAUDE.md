@@ -34,7 +34,10 @@ ais-go-pkg/
 │   └── metrics.go                # Prometheus 指标注册
 │
 ├── middleware/               # HTTP 中间件
-│   └── apikey.go                 # API Key 认证
+│   ├── apikey.go                 # API Key 认证
+│   ├── auth_header.go            # Auth Header 统一认证/透传
+│   ├── error.go                  # Fiber 统一错误处理
+│   └── ratelimit.go              # 请求限流
 │
 ├── transport/                # 传输层
 │   ├── http/

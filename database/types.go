@@ -19,7 +19,7 @@ type JSONB map[string]any
 // Value 实现 driver.Valuer 接口
 func (j JSONB) Value() (driver.Value, error) {
 	if j == nil {
-		return "{}", nil
+		return []byte("{}"), nil
 	}
 	return json.Marshal(j)
 }

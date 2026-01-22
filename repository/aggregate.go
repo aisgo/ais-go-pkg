@@ -16,13 +16,16 @@ import (
  * 安全: 对列名进行白名单验证，防止 SQL 注入
  * ======================================================================== */
 
-// columnRegex 列名正则表达式（只允许字母、数字、下划线、点）
-var columnRegex = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_.]*$`)
+// columnRegex 列名正则表达式（只允许字母、数字、下划线）
+var columnRegex = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
 // validateColumn 验证列名是否安全
 func validateColumn(column string) error {
 	if column == "" {
 		return errors.New(errors.ErrCodeInvalidArgument, "column cannot be empty")
+	}
+	if strings.Contains(column, ".") {
+		return errors.New(errors.ErrCodeInvalidArgument, "column must not contain table qualifier")
 	}
 	if !columnRegex.MatchString(column) {
 		return errors.New(errors.ErrCodeInvalidArgument, "invalid column name: "+column)
@@ -261,9 +264,9 @@ func IsSafeColumnName(column string) bool {
 
 // SanitizeColumnName 清理列名，移除不安全字符
 func SanitizeColumnName(column string) string {
-	// 移除所有非字母数字下划线点字符
+	// 移除所有非字母数字下划线字符
 	return strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '.' {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
 			return r
 		}
 		return -1

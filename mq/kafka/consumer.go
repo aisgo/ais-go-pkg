@@ -180,10 +180,12 @@ func (c *ConsumerAdapter) Start() error {
 	case err := <-startErr:
 		cancel()
 		c.wg.Wait()
+		_ = c.client.Close()
 		return err
 	case <-time.After(30 * time.Second):
 		cancel()
 		c.wg.Wait()
+		_ = c.client.Close()
 		return fmt.Errorf("kafka consumer start timeout")
 	}
 }
@@ -301,7 +303,7 @@ func (h *consumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession,
 
 			// 只有成功处理才标记消息已消费
 			session.MarkMessage(msg, "")
-			if finalResult == mq.ConsumeCommit {
+			if finalResult == mq.ConsumeCommit || !h.adapter.config.Consumer.AutoCommit {
 				session.Commit()
 			}
 

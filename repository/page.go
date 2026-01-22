@@ -2,9 +2,12 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"math"
 
 	"github.com/aisgo/ais-go-pkg/errors"
+
+	"gorm.io/gorm"
 )
 
 /* ========================================================================
@@ -36,42 +39,12 @@ func (r *RepositoryImpl[T]) FindPageWithOpts(ctx context.Context, page, pageSize
 		opt = ApplyOptions(opts)
 	}
 
-	// 构建查询
-	db := r.buildQuery(ctx, opt)
-
-	// 应用 WHERE 条件
-	if query != "" {
-		db = db.Where(query, args...)
-	}
-
-	// 统计总数
-	var total int64
-	if err := db.Model(r.newModelPtr()).Count(&total).Error; err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to count records", err)
-	}
-
-	// 计算分页参数
-	offset := (page - 1) * pageSize
-
-	// 查询数据
-	var list []T
-	if err := db.Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to find records", err)
-	}
-
-	// 计算总页数
-	pages := int64(0)
-	if pageSize > 0 {
-		pages = int64(math.Ceil(float64(total) / float64(pageSize)))
-	}
-
-	return &PageResult[T]{
-		List:     list,
-		Total:    total,
-		Page:     page,
-		PageSize: pageSize,
-		Pages:    pages,
-	}, nil
+	return r.findPageWithSnapshot(ctx, opt, page, pageSize, func(db *gorm.DB) *gorm.DB {
+		if query != "" {
+			return db.Where(query, args...)
+		}
+		return db
+	})
 }
 
 // FindPageByModel 根据模型条件分页查询
@@ -89,13 +62,37 @@ func (r *RepositoryImpl[T]) FindPageByModel(ctx context.Context, page, pageSize 
 	}
 
 	opt := ApplyOptions(opts)
-	db := r.buildQuery(ctx, opt)
+	return r.findPageWithSnapshot(ctx, opt, page, pageSize, func(db *gorm.DB) *gorm.DB {
+		if model != nil {
+			return db.Where(model)
+		}
+		return db
+	})
+}
 
-	// 使用模型作为查询条件
-	if model != nil {
-		db = db.Where(model)
+func (r *RepositoryImpl[T]) findPageWithSnapshot(ctx context.Context, opt *QueryOption, page, pageSize int, apply func(*gorm.DB) *gorm.DB) (*PageResult[T], error) {
+	db := r.withContext(ctx)
+
+	var result *PageResult[T]
+	err := db.Transaction(func(tx *gorm.DB) error {
+		ctxWithTx := context.WithValue(ctx, ctxTxKey{}, tx)
+		query := r.buildQuery(ctxWithTx, opt)
+		if apply != nil {
+			query = apply(query)
+		}
+		var err error
+		result, err = r.findPageWithDB(query, page, pageSize)
+		return err
+	}, &sql.TxOptions{
+		Isolation: sql.LevelRepeatableRead,
+	})
+	if err != nil {
+		return nil, err
 	}
+	return result, nil
+}
 
+func (r *RepositoryImpl[T]) findPageWithDB(db *gorm.DB, page, pageSize int) (*PageResult[T], error) {
 	// 统计总数
 	var total int64
 	if err := db.Model(r.newModelPtr()).Count(&total).Error; err != nil {

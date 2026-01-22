@@ -45,7 +45,7 @@ func TestBuildListenConfigOverrides(t *testing.T) {
 
 func TestHealthEndpoints(t *testing.T) {
 	app := fiber.New()
-	registerHealthEndpoints(app, nil)
+	registerHealthEndpoints(app, nil, 2*time.Second)
 
 	req := httptest.NewRequest("GET", "/healthz", nil)
 	resp, err := app.Test(req, fiber.TestConfig{Timeout: 2 * time.Second})

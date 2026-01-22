@@ -35,7 +35,7 @@ func TestLockAutoExtendIgnoresParentCancel(t *testing.T) {
 	parentCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	lock := client.NewLock("auto", LockOption{TTL: 120 * time.Millisecond, RetryTimes: 1, AutoExtend: true, ExtendFactor: 0.5})
+	lock := client.NewLock("auto", LockOption{TTL: 120 * time.Millisecond, RetryTimes: 1, AutoExtend: true, ExtendFactor: 0.5, IgnoreParentCancel: true})
 	if err := lock.Acquire(parentCtx); err != nil {
 		t.Fatalf("acquire lock: %v", err)
 	}

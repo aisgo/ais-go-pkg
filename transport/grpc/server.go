@@ -2,14 +2,18 @@ package grpc
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net"
+	"os"
 	"runtime/debug"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
@@ -31,8 +35,19 @@ import (
 const bufSize = 1024 * 1024
 
 type Config struct {
-	Port int    `yaml:"port"`
-	Mode string `yaml:"mode"` // monolith or microservice
+	Port int       `yaml:"port"`
+	Mode string    `yaml:"mode"` // monolith or microservice
+	TLS  TLSConfig `yaml:"tls"`
+}
+
+// TLSConfig gRPC 客户端 TLS 配置
+type TLSConfig struct {
+	Enable     bool   `yaml:"enable"`
+	CertFile   string `yaml:"cert_file"`
+	KeyFile    string `yaml:"key_file"`
+	CAFile     string `yaml:"ca_file"`
+	ServerName string `yaml:"server_name"`
+	Insecure   bool   `yaml:"insecure"` // 跳过证书验证
 }
 
 type ListenerProviderParams struct {
@@ -138,10 +153,15 @@ func NewServer(p ServerParams) *grpc.Server {
 
 	p.Lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
-			// 创建 channel 用于传递启动错误
+			// Listener 已经在 NewListener 中预先创建，端口已绑定
+			// 创建 ready channel 用于确认服务器启动
+			readyChan := make(chan struct{})
 			errChan := make(chan error, 1)
 
 			go func() {
+				// 通知已准备就绪（listener 已创建）
+				close(readyChan)
+
 				p.Logger.Info("Starting gRPC Server")
 				if err := s.Serve(p.Listener); err != nil {
 					p.Logger.Error("gRPC Server failed", zap.Error(err))
@@ -149,14 +169,14 @@ func NewServer(p ServerParams) *grpc.Server {
 				}
 			}()
 
-			// 等待一小段时间，确保服务器成功启动
+			// 等待 ready 信号或错误
 			select {
-			case err := <-errChan:
-				// 服务器立即启动失败
-				return err
-			case <-time.After(100 * time.Millisecond):
-				// 服务器似乎成功启动
+			case <-readyChan:
+				// 服务器已准备就绪（listener 已创建并绑定端口）
 				return nil
+			case err := <-errChan:
+				// 服务器启动失败
+				return err
 			case <-ctx.Done():
 				// 上下文被取消
 				return ctx.Err()
@@ -164,8 +184,24 @@ func NewServer(p ServerParams) *grpc.Server {
 		},
 		OnStop: func(ctx context.Context) error {
 			p.Logger.Info("Stopping gRPC Server")
-			s.GracefulStop()
-			return nil
+			stopped := make(chan struct{})
+			go func() {
+				s.GracefulStop()
+				close(stopped)
+			}()
+
+			select {
+			case <-stopped:
+				return nil
+			case <-ctx.Done():
+				p.Logger.Warn("gRPC Server graceful stop timeout, forcing stop", zap.Error(ctx.Err()))
+				s.Stop()
+				select {
+				case <-stopped:
+				default:
+				}
+				return ctx.Err()
+			}
 		},
 	})
 	return s
@@ -178,8 +214,17 @@ type ClientFactory func(target string) (*grpc.ClientConn, error)
 // 如果是 Monolith 模式，自动使用 BufConn Dialer
 func NewClientFactory(cfg Config, inProc *InProcListener) ClientFactory {
 	return func(target string) (*grpc.ClientConn, error) {
+		creds := insecure.NewCredentials()
+		if cfg.Mode != "monolith" && cfg.TLS.Enable {
+			tlsConfig, err := buildTLSConfig(cfg.TLS)
+			if err != nil {
+				return nil, err
+			}
+			creds = credentials.NewTLS(tlsConfig)
+		}
+
 		opts := []grpc.DialOption{
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithTransportCredentials(creds),
 			// 添加默认超时配置
 			grpc.WithDefaultCallOptions(
 				grpc.MaxCallRecvMsgSize(16*1024*1024), // 16MB
@@ -206,4 +251,34 @@ func NewClientFactory(cfg Config, inProc *InProcListener) ClientFactory {
 
 		return grpc.NewClient(target, opts...)
 	}
+}
+
+func buildTLSConfig(cfg TLSConfig) (*tls.Config, error) {
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: cfg.Insecure,
+	}
+
+	if cfg.ServerName != "" {
+		tlsConfig.ServerName = cfg.ServerName
+	}
+
+	if cfg.CAFile != "" {
+		caCert, err := os.ReadFile(cfg.CAFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read CA file: %w", err)
+		}
+		caCertPool := x509.NewCertPool()
+		caCertPool.AppendCertsFromPEM(caCert)
+		tlsConfig.RootCAs = caCertPool
+	}
+
+	if cfg.CertFile != "" && cfg.KeyFile != "" {
+		cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load cert/key pair: %w", err)
+		}
+		tlsConfig.Certificates = []tls.Certificate{cert}
+	}
+
+	return tlsConfig, nil
 }

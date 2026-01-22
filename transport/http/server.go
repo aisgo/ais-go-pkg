@@ -11,6 +11,7 @@ import (
 	"github.com/aisgo/ais-go-pkg/metrics"
 
 	"github.com/gofiber/fiber/v3"
+	recoverer "github.com/gofiber/fiber/v3/middleware/recover"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -25,12 +26,17 @@ import (
 
 // Config HTTP 服务器配置
 type Config struct {
-	Port         int           `yaml:"port"`
-	Host         string        `yaml:"host"`
-	AppName      string        `yaml:"app_name"`
-	ReadTimeout  time.Duration `yaml:"read_timeout"`
-	WriteTimeout time.Duration `yaml:"write_timeout"`
-	IdleTimeout  time.Duration `yaml:"idle_timeout"`
+	Port               int           `yaml:"port"`
+	Host               string        `yaml:"host"`
+	AppName            string        `yaml:"app_name"`
+	ReadTimeout        time.Duration `yaml:"read_timeout"`
+	WriteTimeout       time.Duration `yaml:"write_timeout"`
+	IdleTimeout        time.Duration `yaml:"idle_timeout"`
+	HealthCheckTimeout time.Duration `yaml:"health_check_timeout"`
+
+	// EnableRecover 是否启用 Panic 恢复中间件，默认 true（生产环境推荐）
+	// 设为 false 可在开发/测试环境直接暴露 panic，便于问题定位
+	EnableRecover *bool `yaml:"enable_recover"`
 
 	// Listen 嵌套 ListenConfig 的可序列化配置项
 	Listen ListenOptions `yaml:"listen"`
@@ -140,46 +146,83 @@ func NewHTTPServer(p ServerParams) *fiber.App {
 
 	app := fiber.New(appConfig)
 
+	// 默认启用 Recover 中间件（生产环境必备，防止 panic 导致服务崩溃）
+	// 可通过配置 enable_recover: false 在测试环境禁用，便于问题暴露
+	enableRecover := true
+	if p.Config.EnableRecover != nil {
+		enableRecover = *p.Config.EnableRecover
+	}
+
+	if enableRecover {
+		app.Use(recoverer.New(recoverer.Config{
+			EnableStackTrace: true,
+			StackTraceHandler: func(c fiber.Ctx, e interface{}) {
+				p.Logger.Error("Panic recovered",
+					zap.Any("error", e),
+					zap.String("path", c.Path()),
+					zap.String("method", c.Method()),
+					zap.String("ip", c.IP()),
+				)
+			},
+		}))
+	}
+
 	// 注册健康检查端点
-	registerHealthEndpoints(app, p.DB)
+	healthCheckTimeout := p.Config.HealthCheckTimeout
+	if healthCheckTimeout <= 0 {
+		healthCheckTimeout = 2 * time.Second
+	}
+	registerHealthEndpoints(app, p.DB, healthCheckTimeout)
 
 	// 注册 Prometheus 指标端点
 	metrics.RegisterMetricsEndpoint(app)
 
 	p.Lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
-			// 创建 channel 用于传递启动错误
+			addr := fmt.Sprintf(":%d", p.Config.Port)
+			if p.Config.Host != "" {
+				addr = fmt.Sprintf("%s:%d", p.Config.Host, p.Config.Port)
+			}
+
+			// 预先创建 net.Listener，确保端口绑定成功
+			listenConfig := buildListenConfig(p.Config.Listen)
+			if p.ListenConfigCustomizer != nil {
+				p.ListenConfigCustomizer(&listenConfig)
+			}
+
+			// 使用 Fiber 的 ListenConfig 创建 listener
+			// 注意：Fiber v3 的 Listen 方法内部会创建 listener，我们需要使用 Listener 方法
+			listener, err := createListener(addr, listenConfig)
+			if err != nil {
+				p.Logger.Error("Failed to create HTTP listener", zap.Error(err), zap.String("addr", addr))
+				return fmt.Errorf("failed to bind to %s: %w", addr, err)
+			}
+
+			p.Logger.Info("HTTP Server listener created successfully", zap.String("addr", addr))
+
+			// 创建 ready channel 用于确认服务器启动
+			readyChan := make(chan struct{})
 			errChan := make(chan error, 1)
 
 			go func() {
-				addr := fmt.Sprintf(":%d", p.Config.Port)
-				if p.Config.Host != "" {
-					addr = fmt.Sprintf("%s:%d", p.Config.Host, p.Config.Port)
-				}
+				// 通知已准备就绪（listener 已创建）
+				close(readyChan)
+
 				p.Logger.Info("Starting HTTP Server", zap.String("addr", addr))
-
-				// 构建 ListenConfig
-				listenConfig := buildListenConfig(p.Config.Listen)
-
-				// 允许通过可选的 ListenConfigCustomizer 进行高级自定义
-				if p.ListenConfigCustomizer != nil {
-					p.ListenConfigCustomizer(&listenConfig)
-				}
-
-				if err := app.Listen(addr, listenConfig); err != nil {
-					p.Logger.Error("HTTP Server failed to start", zap.Error(err))
+				if err := app.Listener(listener, listenConfig); err != nil {
+					p.Logger.Error("HTTP Server failed", zap.Error(err))
 					errChan <- err
 				}
 			}()
 
-			// 等待一小段时间，确保服务器成功启动
+			// 等待 ready 信号或错误
 			select {
-			case err := <-errChan:
-				// 服务器立即启动失败
-				return err
-			case <-time.After(100 * time.Millisecond):
-				// 服务器似乎成功启动
+			case <-readyChan:
+				// 服务器已准备就绪（listener 已创建并绑定端口）
 				return nil
+			case err := <-errChan:
+				// 服务器启动失败
+				return err
 			case <-ctx.Done():
 				// 上下文被取消
 				return ctx.Err()
@@ -242,7 +285,7 @@ func buildListenConfig(opts ListenOptions) fiber.ListenConfig {
  *   - 需要检查数据库等依赖是否就绪
  * ======================================================================== */
 
-func registerHealthEndpoints(app *fiber.App, db *gorm.DB) {
+func registerHealthEndpoints(app *fiber.App, db *gorm.DB, timeout time.Duration) {
 	// 存活探针 - 简单返回 OK
 	app.Get("/healthz", func(c fiber.Ctx) error {
 		return c.JSON(fiber.Map{
@@ -258,15 +301,23 @@ func registerHealthEndpoints(app *fiber.App, db *gorm.DB) {
 
 		// 检查数据库连接
 		if db != nil {
+			checkTimeout := timeout
+			if checkTimeout <= 0 {
+				checkTimeout = 2 * time.Second
+			}
 			sqlDB, err := db.DB()
 			if err != nil {
 				checks["database"] = "error: " + err.Error()
 				healthy = false
-			} else if err := sqlDB.Ping(); err != nil {
-				checks["database"] = "error: " + err.Error()
-				healthy = false
 			} else {
-				checks["database"] = "ok"
+				ctx, cancel := context.WithTimeout(context.Background(), checkTimeout)
+				defer cancel()
+				if err := sqlDB.PingContext(ctx); err != nil {
+					checks["database"] = "error: " + err.Error()
+					healthy = false
+				} else {
+					checks["database"] = "ok"
+				}
 			}
 		}
 

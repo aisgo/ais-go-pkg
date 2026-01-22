@@ -109,6 +109,11 @@ func NewDB(p Params) (*gorm.DB, error) {
 
 	sqlDB, err := db.DB()
 	if err != nil {
+		if sqlDB != nil {
+			_ = sqlDB.Close()
+		} else if closer, ok := db.ConnPool.(interface{ Close() error }); ok {
+			_ = closer.Close()
+		}
 		return nil, err
 	}
 
@@ -140,6 +145,14 @@ func NewDB(p Params) (*gorm.DB, error) {
 
 	// 注册生命周期钩子
 	p.Lc.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			if err := sqlDB.PingContext(ctx); err != nil {
+				log.Error("MySQL connection failed", zap.Error(err))
+				return err
+			}
+			log.Info("MySQL connected", zap.String("db", p.Config.DBName))
+			return nil
+		},
 		OnStop: func(ctx context.Context) error {
 			log.Info("Closing MySQL connection pool", zap.String("db", p.Config.DBName))
 			return sqlDB.Close()

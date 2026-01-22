@@ -30,17 +30,18 @@ type Lock struct {
 	defaultOpt   LockOption
 	extendCtx    context.Context
 	extendCancel context.CancelFunc
-	stopOnce     sync.Once  // 确保只停止一次
 	mu           sync.Mutex // 保护 extendCtx 和 extendCancel
 }
 
 // LockOption 锁选项
 type LockOption struct {
-	TTL          time.Duration // 锁过期时间
-	RetryTimes   int           // 重试次数
-	RetryDelay   time.Duration // 重试间隔
-	AutoExtend   bool          // 是否自动续期
-	ExtendFactor float64       // 续期触发因子（TTL 的多少比例时触发续期）
+	TTL                time.Duration // 锁过期时间
+	RetryTimes         int           // 重试次数
+	RetryDelay         time.Duration // 重试间隔
+	AutoExtend         bool          // 是否自动续期
+	ExtendFactor       float64       // 续期触发因子（TTL 的多少比例时触发续期）
+	MaxLifetime        time.Duration // 自动续期最大生命周期（<=0 使用默认值 TTL*10）
+	IgnoreParentCancel bool          // 是否忽略父 context 的取消信号
 }
 
 // DefaultLockOption 默认锁选项
@@ -51,6 +52,7 @@ func DefaultLockOption() LockOption {
 		RetryDelay:   100 * time.Millisecond,
 		AutoExtend:   false,
 		ExtendFactor: 0.5, // TTL 的 50% 时续期
+		MaxLifetime:  0,
 	}
 }
 
@@ -80,15 +82,19 @@ func (l *Lock) AcquireWithOption(ctx context.Context, opt LockOption) error {
 	if opt.TTL > 0 {
 		l.ttl = opt.TTL
 	}
+	value := uuid.New().String()
 	for i := 0; i < opt.RetryTimes; i++ {
-		ok, err := l.client.SetNX(ctx, l.key, l.value, l.ttl)
+		ok, err := l.client.SetNX(ctx, l.key, value, l.ttl)
 		if err != nil {
 			return err
 		}
 		if ok {
+			l.mu.Lock()
+			l.value = value
+			l.mu.Unlock()
 			// 如果开启自动续期，启动续期 goroutine
 			if opt.AutoExtend {
-				l.startAutoExtend(ctx, opt.ExtendFactor)
+				l.startAutoExtend(ctx, opt.ExtendFactor, opt.MaxLifetime, opt.IgnoreParentCancel)
 			}
 			return nil
 		}
@@ -105,45 +111,54 @@ func (l *Lock) AcquireWithOption(ctx context.Context, opt LockOption) error {
 }
 
 // startAutoExtend 启动自动续期（线程安全）
-func (l *Lock) startAutoExtend(parentCtx context.Context, extendFactor float64) {
+func (l *Lock) startAutoExtend(parentCtx context.Context, extendFactor float64, maxLifetime time.Duration, ignoreParentCancel bool) {
 	// 先停止旧的续期 goroutine（如果存在）
 	l.stopAutoExtend()
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	// 使用父 context 的值，但不继承取消信号
+	if extendFactor <= 0 || extendFactor > 1 {
+		extendFactor = DefaultLockOption().ExtendFactor
+	}
+
+	if maxLifetime <= 0 {
+		maxLifetime = l.ttl * 10
+	}
+
+	// 默认继承父 context 的取消信号
 	if parentCtx == nil {
 		parentCtx = context.Background()
 	}
-	ctx := context.WithoutCancel(parentCtx)
-	l.extendCtx, l.extendCancel = context.WithCancel(ctx)
-	// 重置 stopOnce，允许再次停止
-	l.stopOnce = sync.Once{}
+	ctx := parentCtx
+	if ignoreParentCancel {
+		ctx = context.WithoutCancel(parentCtx)
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	l.extendCtx, l.extendCancel = ctx, cancel
 
-	go l.autoExtendLoop(l.extendCtx, extendFactor)
+	go l.autoExtendLoop(l.extendCtx, extendFactor, maxLifetime)
 }
 
 // stopAutoExtend 停止自动续期（线程安全）
 func (l *Lock) stopAutoExtend() {
 	l.mu.Lock()
 	cancel := l.extendCancel
+	l.extendCancel = nil
+	l.extendCtx = nil
 	l.mu.Unlock()
 
 	if cancel != nil {
-		l.stopOnce.Do(func() {
-			cancel()
-		})
+		cancel()
 	}
 }
 
 // autoExtendLoop 自动续期循环
-func (l *Lock) autoExtendLoop(ctx context.Context, extendFactor float64) {
+func (l *Lock) autoExtendLoop(ctx context.Context, extendFactor float64, maxLifetime time.Duration) {
 	// 计算续期间隔
 	interval := time.Duration(float64(l.ttl) * extendFactor)
 
 	// 添加最大生命周期保护（防止无限续期导致 goroutine 泄漏）
-	maxLifetime := l.ttl * 100 // 最多续期到 TTL 的 100 倍
 	deadlineCtx, deadlineCancel := context.WithTimeout(ctx, maxLifetime)
 	defer deadlineCancel()
 
@@ -202,6 +217,10 @@ func (l *Lock) Release(ctx context.Context) error {
 	// 停止自动续期 goroutine
 	l.stopAutoExtend()
 
+	l.mu.Lock()
+	value := l.value
+	l.mu.Unlock()
+
 	// Lua 脚本: 如果 value 匹配则删除
 	script := `
 		if redis.call("GET", KEYS[1]) == ARGV[1] then
@@ -211,7 +230,7 @@ func (l *Lock) Release(ctx context.Context) error {
 		end
 	`
 
-	result, err := l.client.rdb.Eval(ctx, script, []string{l.key}, l.value).Int64()
+	result, err := l.client.rdb.Eval(ctx, script, []string{l.key}, value).Int64()
 	if err != nil {
 		return err
 	}
@@ -223,6 +242,10 @@ func (l *Lock) Release(ctx context.Context) error {
 
 // Extend 延长锁时间
 func (l *Lock) Extend(ctx context.Context, ttl time.Duration) error {
+	l.mu.Lock()
+	value := l.value
+	l.mu.Unlock()
+
 	// Lua 脚本: 如果 value 匹配则延长过期时间
 	script := `
 		if redis.call("GET", KEYS[1]) == ARGV[1] then
@@ -232,7 +255,7 @@ func (l *Lock) Extend(ctx context.Context, ttl time.Duration) error {
 		end
 	`
 
-	result, err := l.client.rdb.Eval(ctx, script, []string{l.key}, l.value, ttl.Milliseconds()).Int64()
+	result, err := l.client.rdb.Eval(ctx, script, []string{l.key}, value, ttl.Milliseconds()).Int64()
 	if err != nil {
 		return err
 	}

@@ -272,7 +272,7 @@ func (r *RepositoryImpl[T]) filterUpdates(updates map[string]any, allowedFields 
 }
 
 // UpsertBatch 批量更新或插入记录
-// 注意：此方法使用 Upsert 语义（如果记录不存在则插入，存在则更新所有字段）。
+// 注意：此方法使用 Upsert 语义（如果记录不存在则插入，存在则更新可更新字段）。
 // 对应 MySQL: INSERT ... ON DUPLICATE KEY UPDATE
 // 对应 Postgres: INSERT ... ON CONFLICT DO UPDATE
 func (r *RepositoryImpl[T]) UpsertBatch(ctx context.Context, models []*T) error {
@@ -298,14 +298,49 @@ func (r *RepositoryImpl[T]) UpsertBatch(ctx context.Context, models []*T) error 
 		}
 	}
 
+	updateColumns, err := r.upsertUpdateColumns()
+	if err != nil {
+		return err
+	}
+	onConflict := clause.OnConflict{}
+	if len(updateColumns) == 0 {
+		onConflict.DoNothing = true
+	} else {
+		onConflict.DoUpdates = clause.AssignmentColumns(updateColumns)
+	}
+
 	// 使用 Upsert 实现高效批量更新
-	if err := r.withContext(ctx).Clauses(clause.OnConflict{
-		UpdateAll: true,
-	}).Save(validModels).Error; err != nil {
+	if err := r.withContext(ctx).Clauses(onConflict).Save(validModels).Error; err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func (r *RepositoryImpl[T]) upsertUpdateColumns() ([]string, error) {
+	schema, err := r.getSchema()
+	if err != nil {
+		return nil, err
+	}
+
+	columns := make([]string, 0, len(schema.Fields))
+	for _, field := range schema.Fields {
+		if field.DBName == "" {
+			continue
+		}
+		if field.PrimaryKey || !field.Updatable {
+			continue
+		}
+		if field.AutoCreateTime > 0 {
+			continue
+		}
+		if field.DBName == tenantColumn || field.DBName == deptColumn {
+			continue
+		}
+		columns = append(columns, field.DBName)
+	}
+
+	return columns, nil
 }
 
 /* ========================================================================
@@ -334,7 +369,14 @@ func (r *RepositoryImpl[T]) DeleteBatch(ctx context.Context, ids []string) error
 	}
 
 	model := r.newModelPtr()
-	return r.applyTenantScope(ctx, r.withContext(ctx)).Delete(model, "id IN ?", ids).Error
+	result := r.applyTenantScope(ctx, r.withContext(ctx)).Delete(model, "id IN ?", ids)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 // HardDelete 硬删除记录（从数据库移除）
